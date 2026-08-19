@@ -35,6 +35,11 @@ local task2ConfirmLabel = nil
 local task2HasDrawn = false
 local task2Confirmed = false
 local task2IsDrawing = false
+local conversationGui = nil
+local conversationToken = 0
+local savedCameraType = nil
+local savedCameraSubject = nil
+local savedCameraCFrame = nil
 
 local function createLabel(parent, name, size, position, textSize)
 	local label = Instance.new("TextLabel")
@@ -106,7 +111,7 @@ local function updateCollectibleCounter()
 		return
 	end
 
-	collectibleCounter.Text = string.format("Story Points: %d / %d", points, required)
+	collectibleCounter.Text = string.format("Bani: %d / %d", points, required)
 	collectibleCounter.Visible = true
 end
 
@@ -116,10 +121,10 @@ local function updateTaskLabel()
 		return
 	end
 
-	local progressText = string.format("Progress: %d / %d", taskState.progress or 0, taskState.required or 0)
+	local progressText = string.format("Progres: %d / %d", taskState.progress or 0, taskState.required or 0)
 	if taskState.endsAt then
 		local remaining = math.max(0, math.ceil(taskState.endsAt - Workspace:GetServerTimeNow()))
-		progressText = string.format("Time left: %02d:%02d", math.floor(remaining / 60), remaining % 60)
+		progressText = string.format("Timp ramas: %02d:%02d", math.floor(remaining / 60), remaining % 60)
 	end
 
 	taskLabel.Text = string.format(
@@ -189,8 +194,8 @@ local function createTask2Gui(payload)
 
 	task2Gui = Instance.new("Frame")
 	task2Gui.Name = "Task2DrawingPanel"
-	task2Gui.Size = UDim2.new(0, 560, 0, 520)
-	task2Gui.Position = UDim2.new(0.5, -280, 0.5, -260)
+	task2Gui.Size = UDim2.new(0, 620, 0, 720)
+	task2Gui.Position = UDim2.new(0.5, -310, 0.5, -360)
 	task2Gui.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 	task2Gui.BorderSizePixel = 0
 	task2Gui.Parent = gui
@@ -205,61 +210,70 @@ local function createTask2Gui(payload)
 	title.Position = UDim2.fromOffset(10, 8)
 	title.BackgroundTransparency = 1
 	title.Font = Enum.Font.GothamBold
-	title.Text = "Draw on the page, then confirm"
+	title.Text = "Citeste acordul(daca vrei) si semneaza mai jos"
 	title.TextColor3 = Color3.fromRGB(245, 245, 245)
 	title.TextSize = 20
 	title.Parent = task2Gui
 
 	local image = Instance.new("ImageLabel")
 	image.Name = "ReferenceImage"
-	image.Size = UDim2.new(0, 170, 0, 170)
-	image.Position = UDim2.fromOffset(20, 62)
+	image.Size = UDim2.new(1, -40, 0, 285)
+	image.Position = UDim2.fromOffset(20, 58)
 	image.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
 	image.BorderSizePixel = 0
 	image.ScaleType = Enum.ScaleType.Fit
 	image.Image = tostring(payload.image or "")
 	image.Parent = task2Gui
 
+	local imageCorner = Instance.new("UICorner")
+	imageCorner.CornerRadius = UDim.new(0, 10)
+	imageCorner.Parent = image
+
 	task2DrawingFrame = Instance.new("Frame")
 	task2DrawingFrame.Name = "DrawingCanvas"
-	task2DrawingFrame.Size = UDim2.new(0, 330, 0, 330)
-	task2DrawingFrame.Position = UDim2.fromOffset(210, 62)
+	task2DrawingFrame.Size = UDim2.new(1, -40, 0, 285)
+	task2DrawingFrame.Position = UDim2.fromOffset(20, 353)
 	task2DrawingFrame.BackgroundColor3 = Color3.fromRGB(245, 242, 232)
 	task2DrawingFrame.BorderSizePixel = 0
 	task2DrawingFrame.ClipsDescendants = true
 	task2DrawingFrame.Parent = task2Gui
 
+	local canvasCorner = Instance.new("UICorner")
+	canvasCorner.CornerRadius = UDim.new(0, 10)
+	canvasCorner.Parent = task2DrawingFrame
+
 	local instructions = Instance.new("TextLabel")
 	instructions.Name = "Instructions"
-	instructions.Size = UDim2.new(0, 170, 0, 100)
-	instructions.Position = UDim2.fromOffset(20, 245)
+	instructions.Size = UDim2.new(1, -40, 0, 24)
+	instructions.Position = UDim2.fromOffset(20, 646)
 	instructions.BackgroundTransparency = 1
 	instructions.Font = Enum.Font.Gotham
-	instructions.Text = "Hold left click and draw anything, even one dot."
+	instructions.Text = "Semneaza te rog"
 	instructions.TextWrapped = true
 	instructions.TextColor3 = Color3.fromRGB(230, 230, 230)
-	instructions.TextSize = 16
+	instructions.TextSize = 14
 	instructions.Parent = task2Gui
 
 	task2ConfirmLabel = Instance.new("TextLabel")
 	task2ConfirmLabel.Name = "ConfirmLabel"
-	task2ConfirmLabel.Size = UDim2.new(1, -40, 0, 28)
-	task2ConfirmLabel.Position = UDim2.fromOffset(20, 405)
+	task2ConfirmLabel.Size = UDim2.new(0, 190, 0, 40)
+	task2ConfirmLabel.Position = UDim2.fromOffset(20, 672)
 	task2ConfirmLabel.BackgroundTransparency = 1
 	task2ConfirmLabel.Font = Enum.Font.GothamBold
 	task2ConfirmLabel.TextColor3 = Color3.fromRGB(245, 245, 245)
-	task2ConfirmLabel.TextSize = 18
+	task2ConfirmLabel.TextSize = 16
+	task2ConfirmLabel.TextXAlignment = Enum.TextXAlignment.Left
 	task2ConfirmLabel.Parent = task2Gui
 
 	task2ConfirmButton = Instance.new("TextButton")
 	task2ConfirmButton.Name = "ConfirmButton"
-	task2ConfirmButton.Size = UDim2.new(0, 220, 0, 52)
-	task2ConfirmButton.Position = UDim2.new(0.5, -110, 1, -72)
+	task2ConfirmButton.Size = UDim2.new(0, 220, 0, 42)
+	task2ConfirmButton.Position = UDim2.new(1, -240, 1, -52)
 	task2ConfirmButton.BackgroundColor3 = Color3.fromRGB(85, 25, 120)
 	task2ConfirmButton.BorderSizePixel = 0
 	task2ConfirmButton.Font = Enum.Font.GothamBold
 	task2ConfirmButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-	task2ConfirmButton.TextSize = 20
+	task2ConfirmButton.TextSize = 18
 	task2ConfirmButton.Visible = false
 	task2ConfirmButton.Parent = task2Gui
 
@@ -298,31 +312,189 @@ local function playFadeTransition(payload)
 		overlay.BorderSizePixel = 0
 		overlay.ZIndex = 1000
 		overlay.Parent = gui
+
+		local transitionText = Instance.new("TextLabel")
+		transitionText.Name = "TransitionText"
+		transitionText.AnchorPoint = Vector2.new(0.5, 0.5)
+		transitionText.Size = UDim2.new(0.8, 0, 0, 120)
+		transitionText.Position = UDim2.fromScale(0.5, 0.5)
+		transitionText.BackgroundTransparency = 1
+		transitionText.Font = Enum.Font.GothamBold
+		transitionText.TextColor3 = Color3.fromRGB(245, 245, 245)
+		transitionText.TextScaled = true
+		transitionText.TextWrapped = true
+		transitionText.TextTransparency = 1
+		transitionText.ZIndex = overlay.ZIndex + 1
+		transitionText.Parent = overlay
 	end
 
+	local transitionText = overlay:FindFirstChild("TransitionText")
+	local fadeText = tostring(payload.text or "")
 	overlay.BackgroundTransparency = 1
 	overlay.Visible = true
 
-	local fadeIn = tonumber(payload.fadeInSeconds) or 1
-	local hold = tonumber(payload.holdSeconds) or 2
-	local fadeOut = tonumber(payload.fadeOutSeconds) or 1
+	if transitionText and transitionText:IsA("TextLabel") then
+		transitionText.Text = fadeText
+		transitionText.Visible = fadeText ~= ""
+		transitionText.TextTransparency = 1
+	end
+
+	local fadeIn = math.max(0.05, tonumber(payload.fadeInSeconds) or 1)
+	local hold = math.max(0, tonumber(payload.holdSeconds) or 2)
+	local fadeOut = math.max(0.05, tonumber(payload.fadeOutSeconds) or 1)
 	local startTime = os.clock()
 
 	task.spawn(function()
 		while os.clock() - startTime < fadeIn do
-			overlay.BackgroundTransparency = 1 - ((os.clock() - startTime) / fadeIn)
+			local alpha = (os.clock() - startTime) / fadeIn
+			overlay.BackgroundTransparency = 1 - alpha
+			if transitionText and transitionText:IsA("TextLabel") then
+				transitionText.TextTransparency = 1 - alpha
+			end
 			RunService.RenderStepped:Wait()
 		end
 		overlay.BackgroundTransparency = 0
+		if transitionText and transitionText:IsA("TextLabel") then
+			transitionText.TextTransparency = 0
+		end
 		task.wait(hold)
 
 		local fadeOutStart = os.clock()
 		while os.clock() - fadeOutStart < fadeOut do
-			overlay.BackgroundTransparency = (os.clock() - fadeOutStart) / fadeOut
+			local alpha = (os.clock() - fadeOutStart) / fadeOut
+			overlay.BackgroundTransparency = alpha
+			if transitionText and transitionText:IsA("TextLabel") then
+				transitionText.TextTransparency = alpha
+			end
 			RunService.RenderStepped:Wait()
 		end
 		overlay.Visible = false
 		overlay.BackgroundTransparency = 1
+		if transitionText and transitionText:IsA("TextLabel") then
+			transitionText.TextTransparency = 1
+		end
+	end)
+end
+
+local function cframeFromPayload(payload)
+	if type(payload) ~= "table" or #payload < 12 then
+		return nil
+	end
+
+	return CFrame.new(table.unpack(payload, 1, 12))
+end
+
+local function restoreConversationCamera()
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	if savedCameraType then
+		camera.CameraType = savedCameraType
+	end
+	if savedCameraSubject then
+		camera.CameraSubject = savedCameraSubject
+	end
+	if savedCameraCFrame then
+		camera.CFrame = savedCameraCFrame
+	end
+end
+
+local function destroyConversationGui()
+	conversationToken += 1
+	if conversationGui then
+		conversationGui:Destroy()
+		conversationGui = nil
+	end
+
+	restoreConversationCamera()
+	savedCameraType = nil
+	savedCameraSubject = nil
+	savedCameraCFrame = nil
+end
+
+local function createConversationGui()
+	if conversationGui then
+		conversationGui:Destroy()
+	end
+
+	conversationGui = Instance.new("Frame")
+	conversationGui.Name = "StoryConversationPanel"
+	conversationGui.AnchorPoint = Vector2.new(0.5, 1)
+	conversationGui.Size = UDim2.new(0.78, 0, 0, 150)
+	conversationGui.Position = UDim2.new(0.5, 0, 1, -36)
+	conversationGui.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+	conversationGui.BorderSizePixel = 2
+	conversationGui.BorderColor3 = Color3.fromRGB(245, 245, 245)
+	conversationGui.ZIndex = 900
+	conversationGui.Parent = gui
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 24)
+	padding.PaddingRight = UDim.new(0, 24)
+	padding.PaddingTop = UDim.new(0, 18)
+	padding.PaddingBottom = UDim.new(0, 18)
+	padding.Parent = conversationGui
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "ConversationText"
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.Font = Enum.Font.Arcade
+	textLabel.Text = ""
+	textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	textLabel.TextSize = 26
+	textLabel.TextWrapped = true
+	textLabel.TextXAlignment = Enum.TextXAlignment.Left
+	textLabel.TextYAlignment = Enum.TextYAlignment.Top
+	textLabel.ZIndex = conversationGui.ZIndex + 1
+	textLabel.Parent = conversationGui
+
+	return textLabel
+end
+
+local function playConversation(payload)
+	destroyConversationGui()
+	conversationToken += 1
+	local token = conversationToken
+
+	local camera = Workspace.CurrentCamera
+	local cameraCFrame = cframeFromPayload(payload.cameraCFrame)
+	if camera and cameraCFrame then
+		savedCameraType = camera.CameraType
+		savedCameraSubject = camera.CameraSubject
+		savedCameraCFrame = camera.CFrame
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = cameraCFrame
+	end
+
+	local textLabel = createConversationGui()
+	local pages = payload.pages or {}
+	local typewriterSpeed = math.max(0.005, tonumber(payload.typewriterSpeed) or 0.035)
+
+	task.spawn(function()
+		for _, page in ipairs(pages) do
+			if token ~= conversationToken then
+				return
+			end
+
+			local fullText = tostring(page.Text or page.text or "")
+			textLabel.Text = ""
+			for index = 1, #fullText do
+				if token ~= conversationToken then
+					return
+				end
+				textLabel.Text = string.sub(fullText, 1, index)
+				task.wait(typewriterSpeed)
+			end
+
+			task.wait(math.max(0, tonumber(page.Duration or page.duration) or 4))
+		end
+
+		if token == conversationToken then
+			destroyConversationGui()
+		end
 	end)
 end
 
@@ -387,7 +559,7 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		updateCollectibleCounter()
 		refreshPromptVisibility()
 	elseif action == "Registered" then
-		showNotification("You registered for the story countdown.")
+		showNotification("Te-ai inscris pentru excursie")
 	elseif action == "Countdown" then
 		countdownEndsAt = tonumber(payload.endsAt)
 		countdownLabel.Visible = countdownEndsAt ~= nil
@@ -399,7 +571,7 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		pointsUiUnlocked = false
 		collectibleCounter.Visible = false
 		countdownLabel.Visible = false
-		showNotification("The story has started...")
+		showNotification("Excursia a inceput")
 	elseif action == "TaskUpdate" then
 		taskState = payload
 		updateTaskLabel()
@@ -411,6 +583,10 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		destroyTask2Gui()
 	elseif action == "FadeTransition" then
 		playFadeTransition(payload)
+	elseif action == "ConversationStart" then
+		playConversation(payload)
+	elseif action == "ConversationEnd" then
+		destroyConversationGui()
 	elseif action == "TaskComplete" then
 		taskState = nil
 		updateTaskLabel()
@@ -423,7 +599,7 @@ end)
 RunService.RenderStepped:Connect(function()
 	if countdownEndsAt then
 		local remaining = math.max(0, math.ceil(countdownEndsAt - Workspace:GetServerTimeNow()))
-		countdownLabel.Text = string.format("Story starts in: %02d:%02d", math.floor(remaining / 60), remaining % 60)
+		countdownLabel.Text = string.format("Excursia incepe in: %02d:%02d", math.floor(remaining / 60), remaining % 60)
 		countdownLabel.Visible = remaining > 0
 		if remaining <= 0 then
 			countdownEndsAt = nil
