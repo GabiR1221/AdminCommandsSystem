@@ -6,10 +6,13 @@
 	The server still validates everything, so exploiters cannot start the story without enough points.
 ]]
 
+local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -40,6 +43,13 @@ local conversationToken = 0
 local savedCameraType = nil
 local savedCameraSubject = nil
 local savedCameraCFrame = nil
+local cutsceneToken = 0
+local cutsceneActive = false
+local cutsceneSavedCamera = nil
+local cutsceneSounds = {}
+local cutsceneEffectGui = nil
+local controlsWereDisabled = false
+local CUTSCENE_CONTROL_ACTION = "StoryCutsceneBlockControls"
 
 local function createLabel(parent, name, size, position, textSize)
 	local label = Instance.new("TextLabel")
@@ -498,6 +508,246 @@ local function playConversation(payload)
 	end)
 end
 
+local function getEnumItem(enumType, value, fallback)
+	if typeof(value) == "EnumItem" and value.EnumType == enumType then
+		return value
+	end
+	local ok, item = pcall(function()
+		return enumType[tostring(value or "")]
+	end)
+	return (ok and item) or fallback
+end
+
+local function setCutsceneControlsEnabled(enabled)
+	local playerScripts = player:FindFirstChild("PlayerScripts")
+	local playerModule = playerScripts and playerScripts:FindFirstChild("PlayerModule")
+	local ok, controls = pcall(function()
+		return playerModule and require(playerModule):GetControls()
+	end)
+
+	if ok and controls then
+		if enabled then
+			controls:Enable()
+		else
+			controls:Disable()
+		end
+		controlsWereDisabled = not enabled
+	end
+
+	if enabled then
+		ContextActionService:UnbindAction(CUTSCENE_CONTROL_ACTION)
+	else
+		ContextActionService:BindActionAtPriority(
+			CUTSCENE_CONTROL_ACTION,
+			function() return Enum.ContextActionResult.Sink end,
+			false,
+			Enum.ContextActionPriority.High.Value,
+			table.unpack(Enum.PlayerActions:GetEnumItems())
+		)
+	end
+end
+
+local function stopCutscene()
+	cutsceneToken += 1
+	if not cutsceneActive then
+		return
+	end
+	cutsceneActive = false
+
+	for _, sound in ipairs(cutsceneSounds) do
+		if sound.Parent then sound:Destroy() end
+	end
+	table.clear(cutsceneSounds)
+	if cutsceneEffectGui then
+		cutsceneEffectGui:Destroy()
+		cutsceneEffectGui = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera and cutsceneSavedCamera then
+		camera.CameraType = cutsceneSavedCamera.cameraType
+		camera.CameraSubject = cutsceneSavedCamera.cameraSubject
+		camera.CFrame = cutsceneSavedCamera.cframe
+		camera.FieldOfView = cutsceneSavedCamera.fieldOfView
+	end
+	cutsceneSavedCamera = nil
+
+	if controlsWereDisabled then
+		setCutsceneControlsEnabled(true)
+	else
+		ContextActionService:UnbindAction(CUTSCENE_CONTROL_ACTION)
+	end
+end
+
+local function playCutsceneSound(soundData)
+	if type(soundData) ~= "table" or tostring(soundData.soundId or "") == "" then
+		return
+	end
+	local sound = Instance.new("Sound")
+	sound.Name = "StoryCutsceneSound"
+	sound.SoundId = tostring(soundData.soundId)
+	sound.Volume = math.clamp(tonumber(soundData.volume) or 0.5, 0, 10)
+	sound.PlaybackSpeed = math.clamp(tonumber(soundData.playbackSpeed) or 1, 0.05, 4)
+	sound.Looped = soundData.looped == true
+	sound.Parent = SoundService
+	table.insert(cutsceneSounds, sound)
+	sound:Play()
+	if not sound.Looped then
+		sound.Ended:Once(function()
+			if sound.Parent then sound:Destroy() end
+		end)
+	end
+end
+
+local function waitForCutscene(token, duration)
+	local finishAt = os.clock() + math.max(0, duration)
+	while token == cutsceneToken and os.clock() < finishAt do
+		RunService.RenderStepped:Wait()
+	end
+	return token == cutsceneToken
+end
+
+local function playBlackScreenEffect(event, token)
+	if token ~= cutsceneToken then return end
+	if cutsceneEffectGui then cutsceneEffectGui:Destroy() end
+	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+	if not playerGui then return end
+
+	local effectGui = Instance.new("ScreenGui")
+	effectGui.Name = "StoryCutsceneEffect"
+	effectGui.IgnoreGuiInset = true
+	effectGui.ResetOnSpawn = false
+	effectGui.DisplayOrder = 10000
+	effectGui.Parent = playerGui
+	cutsceneEffectGui = effectGui
+
+	local fadeIn = tonumber(event.fadeInSeconds) or 0.35
+	local hold = tonumber(event.holdSeconds) or 1
+	local fadeOut = tonumber(event.fadeOutSeconds) or 0.35
+	local transitionType = string.lower(tostring(event.transitionType or "normal"))
+	if transitionType == "wink" then
+		-- Use fixed half-screen panels and tween their positions. Tweening a Frame
+		-- from zero height was unreliable on some viewport/device combinations.
+		local top = Instance.new("Frame")
+		top.Name = "TopEyelid"
+		top.Size = UDim2.fromScale(1, 0.505)
+		top.Position = UDim2.fromScale(0, -0.505)
+		top.BackgroundColor3 = Color3.new(0, 0, 0)
+		top.BorderSizePixel = 0
+		top.ZIndex = 10
+		top.Parent = effectGui
+
+		local bottom = Instance.new("Frame")
+		bottom.Name = "BottomEyelid"
+		bottom.Size = UDim2.fromScale(1, 0.505)
+		bottom.Position = UDim2.fromScale(0, 1)
+		bottom.BackgroundColor3 = Color3.new(0, 0, 0)
+		bottom.BorderSizePixel = 0
+		bottom.ZIndex = 10
+		bottom.Parent = effectGui
+
+		local closeInfo = TweenInfo.new(fadeIn, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		TweenService:Create(top, closeInfo, { Position = UDim2.fromScale(0, 0) }):Play()
+		TweenService:Create(bottom, closeInfo, { Position = UDim2.fromScale(0, 0.495) }):Play()
+		if not waitForCutscene(token, fadeIn + hold) then return end
+
+		local openInfo = TweenInfo.new(fadeOut, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		TweenService:Create(top, openInfo, { Position = UDim2.fromScale(0, -0.505) }):Play()
+		TweenService:Create(bottom, openInfo, { Position = UDim2.fromScale(0, 1) }):Play()
+	else
+		local black = Instance.new("Frame")
+		black.Name = "BlackScreen"
+		black.Size = UDim2.fromScale(1, 1)
+		black.BackgroundColor3 = Color3.new(0, 0, 0)
+		black.BackgroundTransparency = 1
+		black.BorderSizePixel = 0
+		black.Parent = effectGui
+		TweenService:Create(black, TweenInfo.new(fadeIn, Enum.EasingStyle.Linear), { BackgroundTransparency = 0 }):Play()
+		if not waitForCutscene(token, fadeIn + hold) then return end
+		TweenService:Create(black, TweenInfo.new(fadeOut, Enum.EasingStyle.Linear), { BackgroundTransparency = 1 }):Play()
+	end
+	if not waitForCutscene(token, fadeOut) then return end
+	if cutsceneEffectGui == effectGui then cutsceneEffectGui = nil end
+	effectGui:Destroy()
+end
+
+local function playCutscene(payload)
+	stopCutscene()
+	destroyConversationGui()
+	cutsceneToken += 1
+	local token = cutsceneToken
+	local camera = Workspace.CurrentCamera
+	if not camera then return end
+
+	cutsceneActive = true
+	cutsceneSavedCamera = {
+		cameraType = camera.CameraType,
+		cameraSubject = camera.CameraSubject,
+		cframe = camera.CFrame,
+		fieldOfView = camera.FieldOfView,
+	}
+	if payload.freezeControls ~= false then
+		setCutsceneControlsEnabled(false)
+	end
+	camera.CameraType = Enum.CameraType.Scriptable
+
+	local cutsceneStartedAt = os.clock()
+	local latestEventEnd = 0
+	for _, event in ipairs(payload.events or {}) do
+		local eventTime = math.max(0, tonumber(event.time) or 0)
+		latestEventEnd = math.max(latestEventEnd, eventTime
+			+ math.max(0, tonumber(event.fadeInSeconds) or 0)
+			+ math.max(0, tonumber(event.holdSeconds) or 0)
+			+ math.max(0, tonumber(event.fadeOutSeconds) or 0))
+		task.delay(eventTime, function()
+			if token == cutsceneToken and event.type == "BlackScreen" then
+				playBlackScreenEffect(event, token)
+			end
+		end)
+	end
+
+	task.spawn(function()
+		for _, shot in ipairs(payload.shots or {}) do
+			if token ~= cutsceneToken then return end
+			local target = cframeFromPayload(shot.cameraCFrame)
+			if target then
+				local duration = math.max(0, tonumber(shot.moveDuration) or 0)
+				local goal = { CFrame = target }
+				if shot.fieldOfView then goal.FieldOfView = math.clamp(tonumber(shot.fieldOfView) or 70, 1, 120) end
+				if duration == 0 then
+					for property, value in pairs(goal) do camera[property] = value end
+				else
+					local tween = TweenService:Create(camera, TweenInfo.new(
+						duration,
+						getEnumItem(Enum.EasingStyle, shot.easingStyle, Enum.EasingStyle.Sine),
+						getEnumItem(Enum.EasingDirection, shot.easingDirection, Enum.EasingDirection.InOut)
+						), goal)
+					tween:Play()
+					local started = os.clock()
+					while token == cutsceneToken and os.clock() - started < duration do RunService.RenderStepped:Wait() end
+					if token ~= cutsceneToken then tween:Cancel(); return end
+				end
+			end
+			playCutsceneSound(shot.sound)
+			local holdUntil = os.clock() + math.max(0, tonumber(shot.holdDuration) or 0)
+			while token == cutsceneToken and os.clock() < holdUntil do RunService.RenderStepped:Wait() end
+		end
+
+		-- A timed effect may intentionally outlast the final camera shot. Keep the
+		-- cutscene alive until that effect finishes instead of deleting its GUI early.
+		local remainingEffectTime = latestEventEnd - (os.clock() - cutsceneStartedAt)
+		if remainingEffectTime > 0 and not waitForCutscene(token, remainingEffectTime) then return end
+		if token == cutsceneToken then stopCutscene() end
+	end)
+end
+
+player.CharacterAdded:Connect(function()
+	if cutsceneActive then
+		stopCutscene()
+	end
+end)
+
+
 local function setStoryStartPromptEnabled(enabled)
 	local startPart = Workspace:FindFirstChild(UI_CONFIG.StoryStartPartName)
 	if not startPart then
@@ -587,6 +837,10 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		playConversation(payload)
 	elseif action == "ConversationEnd" then
 		destroyConversationGui()
+	elseif action == "CutsceneStart" then
+		playCutscene(payload)
+	elseif action == "CutsceneEnd" then
+		stopCutscene()
 	elseif action == "TaskComplete" then
 		taskState = nil
 		updateTaskLabel()
