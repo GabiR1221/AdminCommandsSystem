@@ -35,7 +35,7 @@ local Workspace = game:GetService("Workspace")
 local CONFIG = {
 	PointsRequired = 30,
 	PointsPerCollectible = 10,
-	CountdownSeconds = 25,
+	CountdownSeconds = 5,
 
 	-- Collectible spawning. Put invisible anchored Parts in Workspace.StoryCollectibleSpawns.
 	SpawnPointsFolderName = "StoryCollectibleSpawns",
@@ -107,7 +107,7 @@ local CONFIG = {
 
 	-- Data-driven story tasks. Change Type to "Waypoint", "Drawing", "Wait", "Instant", or "Delivery".
 	-- StartActions run when a task begins. EndActions run after that task completes.
-	-- Supported actions: Fade, Teleport, LoadMap, UnloadMap, UnloadAllMaps, Conversation, CloseDrawing, CloseConversation, Message, PlaySound, SetLighting.
+	-- Supported actions: Fade, Teleport, LoadMap, UnloadMap, UnloadAllMaps, Conversation, Cutscene, CloseCutscene, PlayAnimation, StopAnimation, CloseDrawing, CloseConversation, Message, PlaySound, SetLighting.
 	Tasks = {
 		{
 			Id = "FirstTask",
@@ -161,6 +161,46 @@ local CONFIG = {
 			Description = "Destinatia: Tacau",
 			Duration = 15,
 			CompleteMessage = "Ati ajuns",
+			StartActions = {
+				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 3, FadeOutSeconds = 1, Text = "Dupa ceva timp...." },
+				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
+				{
+					Type = "PlayAnimation",
+					ModelName = "masinblej2",
+					AnimationName = "MasinaBlej",
+					ModelRootName = "LoadedStoryMap", -- must match LoadMap.LoadedName
+					TrackName = "masinablej", -- unique ID used to stop/replace this track
+					Looped = true,
+					Speed = 1,
+					FadeTime = 0.25,
+					Priority = "Action",
+					Duration = 30,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				{
+					Type = "PlayAnimation",
+					ModelRootName = "LoadedStoryMap", -- must match LoadMap.LoadedName
+					ModelName = "pigon",
+					AnimationName = "Pigon",  -- Animation is inside the pigon Model
+					TrackName = "PigonIdleTrack",
+					Looped = true,
+					WaitForModelSeconds = 5,
+					Duration = 30,
+				},
+			},
+			EndActions = {
+				{
+					Type = "StopAnimation",
+					TrackName = "masinablej",
+					Delay = 1,
+					FadeTime = 0.5,
+				},
+				{
+					Type = "StopAnimation",
+					TrackName = "pigon",
+					Delay = 1,
+					FadeTime = 0.5,
+				}
+			},
 		},
 		{
 			Id = "WaitInDarkness2",
@@ -249,36 +289,118 @@ local CONFIG = {
 		{
 			Id = "WaitInDarkness3",
 			Type = "Wait",
-			Title = "Asteptati sa vina DoamnaN",
-			Description = "Asteptati putintel in cabina",
+			Title = "Explorati cabana",
+			Description = "Asteptati putintel in cabana pentru a va culca linistiti",
 			Duration = 15,
 			CompleteMessage = "...",
+			StartActions = {
+				{ Type = "Teleport", PartName = "CabanaTeleportPart", Delay = 1.4 },
+				{ Type = "LoadMap", MapName = "PeretiCabana", LoadedName = "PeretiLoaded", Delay = 1 },
+
+			},
+			
 		},
 		{
 			Id = "AfterDarkness3",
 			Type = "Wait",
 			Title = "...",
 			Description = "...",
-			Duration = 15,
+			Duration = 150,
 			StartActions = {
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 				{
-					Type = "Conversation",
-					Delay = 2.5,
-					CameraPartName = "CabanaInauntruCameraPart",
-					TypewriterSpeed = 0.035,
-					Pages = {
-						{ Text = "Ce s-a auzit?", Duration = 6 },
+					Type = "Cutscene",
+					Delay = 1,                  -- optional delay before the whole action
+					FreezeControls = true,      -- default true
+					Shots = {
+						{
+							CameraPartName = "CabanaCamera1",
+							MoveDuration = 0,   -- 0 snaps to this point
+							HoldDuration = 5,
+							FieldOfView = 70,
+						},
+						{
+							CameraPartName = "CabanaCamera2",
+							MoveDuration = 2,
+							HoldDuration = 5,
+							EasingStyle = "Sine",
+							EasingDirection = "InOut",
+							FieldOfView = 80,
+						},
+					},
+					Events = {
+						{
+							Type = "BlackScreen",
+							Time = 8,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.25,
+							HoldSeconds = 1,
+							FadeOutSeconds = 0.4,
+						},
 					},
 				},
 			},
 			EndActions = {
 				{ Type = "LoadMap", MapName = "police", LoadedName = "policeLoaded", Delay = 1 },
+				{ Type = "CloseCutscene", Delay = 1 }
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
 		},
 	},
 }
+
+
+--[[
+{
+	Type = "Cutscene",
+	Delay = 1,                  -- optional delay before the whole action
+	FreezeControls = true,      -- default true
+	Shots = {
+		{
+			CameraPartName = "IntroCamera1",
+			MoveDuration = 0,   -- 0 snaps to this point
+			HoldDuration = 2,
+			FieldOfView = 70,
+			SoundName = "IntroBoom", -- optional Sound in ServerStorage.StoryStorage
+			Volume = 0.8,              -- optional per-shot override
+			PlaybackSpeed = 1,         -- optional per-shot override
+		},
+		{
+			CameraPartName = "IntroCamera2",
+			MoveDuration = 4,
+			HoldDuration = 1.5,
+			EasingStyle = "Sine",
+			EasingDirection = "InOut",
+			FieldOfView = 55,
+		},
+		{
+			CameraPartName = "IntroCamera3",
+			MoveDuration = 2,
+			HoldDuration = 3,
+			EasingStyle = "Quad",
+			EasingDirection = "Out",
+		},
+	},
+	    Events = {
+        {
+            Type = "BlackScreen",
+            Time = 1.5,
+            TransitionType = "Normal", -- regular fade to/from black
+            FadeInSeconds = 0.4,
+            HoldSeconds = 1,
+            FadeOutSeconds = 0.5,
+        },
+        {
+            Type = "BlackScreen",
+            Time = 6,
+            TransitionType = "Wink", -- top/bottom eyelids close and open
+            FadeInSeconds = 0.25,
+            HoldSeconds = 0.6,
+            FadeOutSeconds = 0.4,
+        },
+    },
+},
+--]]
 
 local REMOTE_EVENT_NAME = "StoryHorrorUIEvent"
 
@@ -298,6 +420,7 @@ local currentTaskConnection = nil
 local currentTaskToken = 0
 local currentTaskConnections = {}
 local currentDeliveryState = nil
+local activeStoryAnimationTracks = {}
 
 local runtimeFolder = Workspace:FindFirstChild(CONFIG.RuntimeFolderName)
 if not runtimeFolder then
@@ -921,6 +1044,183 @@ local function fireConversation(action)
 	fireUiToStoryPlayers("ConversationStart", payload)
 end
 
+local function getCutsceneSoundPayload(soundName)
+	if not soundName then return nil end
+	local sound = findStoryStorageChild(soundName)
+	if not sound or not sound:IsA("Sound") then
+		warn("StoryHorror: Missing cutscene Sound named " .. tostring(soundName) .. " inside ServerStorage." .. CONFIG.StoryStorageFolderName)
+		return nil
+	end
+	return {
+		soundId = sound.SoundId,
+		volume = sound.Volume,
+		playbackSpeed = sound.PlaybackSpeed,
+		looped = sound.Looped,
+	}
+end
+
+local function fireCutscene(action)
+	local payload = {
+		freezeControls = action.FreezeControls ~= false,
+		shots = {},
+		events = {},
+	}
+
+	for index, shot in ipairs(action.Shots or {}) do
+		if index > 100 then
+			warn("StoryHorror: Cutscene limited to 100 shots.")
+			break
+		end
+		local cameraCFrame = getPartCFramePayload(shot.CameraPartName)
+		if cameraCFrame then
+			local soundPayload = getCutsceneSoundPayload(shot.SoundName)
+			if soundPayload then
+				soundPayload.volume = math.clamp(tonumber(shot.Volume) or soundPayload.volume, 0, 10)
+				soundPayload.playbackSpeed = math.clamp(tonumber(shot.PlaybackSpeed) or soundPayload.playbackSpeed, 0.05, 4)
+				if shot.Looped ~= nil then soundPayload.looped = shot.Looped == true end
+			end
+			table.insert(payload.shots, {
+				cameraCFrame = cameraCFrame,
+				moveDuration = math.clamp(tonumber(shot.MoveDuration) or 0, 0, 120),
+				holdDuration = math.clamp(tonumber(shot.HoldDuration) or 0, 0, 120),
+				easingStyle = tostring(shot.EasingStyle or "Sine"),
+				easingDirection = tostring(shot.EasingDirection or "InOut"),
+				fieldOfView = shot.FieldOfView and math.clamp(tonumber(shot.FieldOfView) or 70, 1, 120) or nil,
+				sound = soundPayload,
+			})
+		end
+	end
+
+	for index, event in ipairs(action.Events or {}) do
+		if index > 50 then
+			warn("StoryHorror: Cutscene limited to 50 timed events.")
+			break
+		end
+		if string.lower(tostring(event.Type or "")) == "blackscreen" then
+			local transitionType = string.lower(tostring(event.TransitionType or "Normal"))
+			if transitionType ~= "normal" and transitionType ~= "wink" then
+				warn("StoryHorror: Unknown black-screen TransitionType " .. tostring(event.TransitionType) .. "; using Normal.")
+				transitionType = "normal"
+			end
+			table.insert(payload.events, {
+				time = math.clamp(tonumber(event.Time or event.At) or 0, 0, 600),
+				type = "BlackScreen",
+				transitionType = transitionType,
+				fadeInSeconds = math.clamp(tonumber(event.FadeInSeconds) or 0.35, 0.01, 10),
+				holdSeconds = math.clamp(tonumber(event.HoldSeconds) or 1, 0, 120),
+				fadeOutSeconds = math.clamp(tonumber(event.FadeOutSeconds) or 0.35, 0.01, 10),
+			})
+		else
+			warn("StoryHorror: Unknown cutscene event Type " .. tostring(event.Type))
+		end
+	end
+
+	if #payload.shots > 0 then
+		fireUiToStoryPlayers("CutsceneStart", payload)
+	else
+		warn("StoryHorror: Cutscene has no valid camera shots.")
+	end
+end
+
+local function stopStoryAnimation(trackName, fadeTime)
+	local track = activeStoryAnimationTracks[trackName]
+	if not track then return end
+	activeStoryAnimationTracks[trackName] = nil
+	if track.IsPlaying then
+		track:Stop(math.clamp(tonumber(fadeTime) or 0.2, 0, 10))
+	end
+end
+
+local function findAnimationModel(action)
+	local modelName = tostring(action.ModelName or "")
+	local rootName = tostring(action.ModelRootName or action.LoadedMapName or "")
+	local searchRoot = Workspace
+
+	if rootName ~= "" then
+		local loadedRecord = loadedStoryMaps[rootName]
+		searchRoot = loadedRecord and loadedRecord.instance or Workspace:FindFirstChild(rootName, true)
+		if not searchRoot then return nil end
+	end
+
+	if searchRoot:IsA("Model") and searchRoot.Name == modelName then
+		return searchRoot
+	end
+	local model = searchRoot:FindFirstChild(modelName, true)
+	return model and model:IsA("Model") and model or nil
+end
+
+local function playStoryAnimationWhenReady(action)
+	local modelName = tostring(action.ModelName or "")
+	local animationName = tostring(action.AnimationName or action.Name or "")
+	local waitSeconds = math.clamp(tonumber(action.WaitForModelSeconds) or 5, 0, 30)
+	local deadline = os.clock() + waitSeconds
+	local model = findAnimationModel(action)
+
+	-- PlayAnimation may be listed before LoadMap in the same StartActions table.
+	-- Poll asynchronously so it never blocks the later LoadMap action from running.
+	while not model and os.clock() < deadline do
+		task.wait(0.1)
+		model = findAnimationModel(action)
+	end
+	if not model then
+		local rootName = action.ModelRootName or action.LoadedMapName
+		warn("StoryHorror: Missing Workspace model named " .. modelName
+			.. (rootName and (" inside loaded root " .. tostring(rootName)) or "")
+			.. " after waiting " .. tostring(waitSeconds) .. " seconds")
+		return
+	end
+
+	-- Keep each animation with the rig that uses it. This avoids global name
+	-- collisions and makes a story model self-contained when maps are loaded.
+	local animation = model:FindFirstChild(animationName, true)
+	if not animation or not animation:IsA("Animation") or animation.AnimationId == "" then
+		warn("StoryHorror: Model " .. model:GetFullName() .. " is missing a valid descendant Animation named " .. animationName)
+		return
+	end
+
+	local host = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
+	if not host then
+		host = Instance.new("AnimationController")
+		host.Name = "StoryAnimationController"
+		host.Parent = model
+	end
+	local animator = host:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = host
+	end
+
+	local trackName = tostring(action.TrackName or (modelName .. ":" .. animationName))
+	stopStoryAnimation(trackName, action.FadeTime)
+	local ok, track = pcall(function() return animator:LoadAnimation(animation) end)
+	if not ok or not track then
+		warn("StoryHorror: Could not load animation " .. animationName .. " on " .. model:GetFullName())
+		return
+	end
+	activeStoryAnimationTracks[trackName] = track
+	track.Looped = action.Looped == true
+	track.Priority = Enum.AnimationPriority.Action
+	if action.Priority then
+		local priorityOk, priority = pcall(function() return Enum.AnimationPriority[tostring(action.Priority)] end)
+		if priorityOk and priority then track.Priority = priority end
+	end
+	track:Play(math.clamp(tonumber(action.FadeTime) or 0.2, 0, 10), 1, math.clamp(tonumber(action.Speed) or 1, 0.05, 10))
+	track.Stopped:Once(function()
+		if activeStoryAnimationTracks[trackName] == track then activeStoryAnimationTracks[trackName] = nil end
+	end)
+
+	local duration = tonumber(action.Duration)
+	if duration and duration >= 0 then
+		task.delay(math.clamp(duration, 0, 3600), function()
+			if activeStoryAnimationTracks[trackName] == track then stopStoryAnimation(trackName, action.StopFadeTime or action.FadeTime) end
+		end)
+	end
+end
+
+local function playStoryAnimation(action)
+	task.spawn(playStoryAnimationWhenReady, action)
+end
+
 local function playStorySound(action)
 	local soundName = action.SoundName or action.Name
 	local soundTemplate = findStoryStorageChild(soundName)
@@ -1055,6 +1355,14 @@ local function runTaskAction(action)
 		unloadAllStoryMaps()
 	elseif actionType == "conversation" then
 		fireConversation(action)
+	elseif actionType == "cutscene" then
+		fireCutscene(action)
+	elseif actionType == "closecutscene" then
+		fireUiToStoryPlayers("CutsceneEnd", {})
+	elseif actionType == "playanimation" then
+		playStoryAnimation(action)
+	elseif actionType == "stopanimation" then
+		stopStoryAnimation(tostring(action.TrackName or ""), action.FadeTime)
 	elseif actionType == "closeconversation" then
 		fireUiToStoryPlayers("ConversationEnd", {})
 	elseif actionType == "closedrawing" then
@@ -1066,7 +1374,7 @@ local function runTaskAction(action)
 	elseif actionType == "setlighting" then
 		setLightingFromSkybox(action.SkyboxName or action.Name)
 	end
-end
+end			
 
 local function runTaskActions(actions)
 	if not actions then
