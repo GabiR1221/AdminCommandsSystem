@@ -36,6 +36,12 @@ local CONFIG = {
 	PointsRequired = 30,
 	PointsPerCollectible = 10,
 	CountdownSeconds = 5,
+	
+	-- Security/gameplay: tools in these containers are permanently destroyed for
+	-- registered players when the story begins. StarterGear is included so the
+	-- removed tools do not return after a respawn.
+	RemoveToolsWhenStoryStarts = false,
+	RemoveToolsFromStarterGear = false,
 
 	-- Collectible spawning. Put invisible anchored Parts in Workspace.StoryCollectibleSpawns.
 	SpawnPointsFolderName = "StoryCollectibleSpawns",
@@ -128,6 +134,7 @@ local CONFIG = {
 			Description = "",
 			Duration = 20,
 			StartActions = {
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" } },
 				{
 					Type = "Conversation",
 					Delay = 1,
@@ -135,7 +142,15 @@ local CONFIG = {
 					TypewriterSpeed = 0.035,
 					Pages = {
 						{ Text = "Bun dragilor.... acum ca ati adus banii de excursie, trebuie sa semnati un acord prin care sa aratati ca sunteti de acord cu excursia si toate cele legate de excursie.", Duration = 6 },
-						{ Text = "O sa va dau foaia imediat, doar stati putin(sunete mici chiar inauzibile fara un microscop de demon)", Duration = 5 },
+						{ Text = "O sa va dau foaia imediat, doar stati putin(sunete mici chiar inauzibile fara un microscop de demon)", Duration = 5,
+							Glitch = {
+								Words = { "inauzibile", "demon" },
+								Chance = 0.45,
+								Interval = 0.045,
+								JitterPixels = 2,
+								Characters = "NAZARU",
+							},
+						},
 					},
 				},
 			},
@@ -164,6 +179,7 @@ local CONFIG = {
 			StartActions = {
 				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 3, FadeOutSeconds = 1, Text = "Dupa ceva timp...." },
 				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
+				{ Type = "SetUIVisible", Visible = true, Delay = "3", Elements = { "Task", "Notifications" } },
 				{
 					Type = "PlayAnimation",
 					ModelName = "masinblej2",
@@ -199,7 +215,8 @@ local CONFIG = {
 					TrackName = "pigon",
 					Delay = 1,
 					FadeTime = 0.5,
-				}
+				},
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" } },
 			},
 		},
 		{
@@ -212,6 +229,7 @@ local CONFIG = {
 				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 3, FadeOutSeconds = 1, Text = "Dupa ceva timp...." },
 				{ Type = "LoadMap", MapName = "TacauCityResidence", LoadedName = "LoadedStoryMap", Delay = 1 },
 				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
+				{ Type = "SetUIVisible", Visible = true, Delay = "3", Elements = { "Task", "Notifications" } },
 			},
 		},
 		{
@@ -233,6 +251,7 @@ local CONFIG = {
 						{ Text = "Bun dragilor, acum problema este ca trebuie sa ajungem pe partea cealalta a dunarii si nu avem cu ce, este o barca acolo dar nu incapem toti, puteti face pod cu lemnele pe care le gasiti in padure?", Duration = 8 },
 					},
 				},
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" } },
 			},
 		},
 		-- Delivery task example. No StageDisplayPart is needed – stages appear exactly where they were in ServerStorage.
@@ -245,9 +264,13 @@ local CONFIG = {
 			DeliveryPartName = "RelicDeliveryPart",
 			RequiredDeliveries = 3,
 			StageFolderName = "RelicStages", -- Contains Stage1, Stage2, Stage3 models.
+			StartActions = {
+				{ Type = "SetUIVisible", Visible = true, Elements = { "Task", "Notifications" } },
+			},
 			EndActions = {
 				-- Example of a sound that plays 3 times with 2 seconds between each:
 				-- { Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
+				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
 			},
 		},
 		{
@@ -264,9 +287,15 @@ local CONFIG = {
 					TypewriterSpeed = 0.035,
 					Pages = {
 						{ Text = "Bravo ca ati facut podul dragilor!", Duration = 4 },
-						{ Text = "acum trebuie sa ma duc undeva, m-a chemat doamna directoare, duceti-va la cabana ca voi veni eu dragilor!", Duration = 6 },
+						{ Text = "acum hai la pod!", Duration = 2.5 },
 					},
 				},
+				{ Type = "SetUIVisible", Visible = false, Delay = "4", Elements = { "Task", "Notifications" } },
+			},
+			EndActions = {
+				{ Type = "UnLoadMap", MapName = "DoamnaN", LoadedName = "DoamnaNLoaded", Delay = 1 },
+				{ Type = "LoadMap", MapName = "DoamnaNMergatoare", LoadedName = "Doamnanmergatoare", Delay = 0 },
+				{ Type = "SetUIVisible", Visible = true, Elements = { "Task", "Notifications" } },
 			},
 		},
 		{
@@ -281,7 +310,8 @@ local CONFIG = {
 				{ Type = "Teleport", PartName = "TaskCabanaTeleportPart" },
 				-- Unload map (works with "UnloadMap" or "UnLoadMap", etc.)
 				{ Type = "UnLoadMap", MapName = "DoamnaN", LoadedName = "DoamnaNLoaded", Delay = 1 },
-				{ Type = "SetLighting", SkyboxName = "Black" },
+				{ Type = "UnLoadMap", MapName = "DoamnaNMergatoare", LoadedName = "Doamnanmergatoare", Delay = 1 },
+				{ Type = "SetLighting", Delay = "4.5", SkyboxName = "Black" },
 				--{ Type = "LoadMap", MapName = "police", LoadedName = "policeLoaded", Delay = 1 },
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
@@ -1373,6 +1403,19 @@ local function runTaskAction(action)
 		playStorySound(action)
 	elseif actionType == "setlighting" then
 		setLightingFromSkybox(action.SkyboxName or action.Name)
+	elseif actionType == "setuivisible" or actionType == "hideui" or actionType == "showui" then
+		local visible = action.Visible
+		if actionType == "hideui" then
+			visible = false
+		elseif actionType == "showui" then
+			visible = true
+		elseif visible == nil then
+			visible = true
+		end
+		fireUiToStoryPlayers("UIVisibility", {
+			visible = visible == true,
+			elements = action.Elements,
+		})
 	end
 end			
 
@@ -1851,6 +1894,22 @@ local function startStory()
 			local data = getData(player)
 			data.inStory = true
 			activeStoryPlayers[player] = true
+			if CONFIG.RemoveToolsWhenStoryStarts then
+				-- Equipped tools are parented to Character; unequipped tools are in Backpack.
+				local containers = { player.Character, player:FindFirstChildOfClass("Backpack") }
+				if CONFIG.RemoveToolsFromStarterGear then
+					table.insert(containers, player:FindFirstChild("StarterGear"))
+				end
+				for _, container in ipairs(containers) do
+					if container then
+						for _, child in ipairs(container:GetChildren()) do
+							if child:IsA("Tool") then
+								child:Destroy()
+							end
+						end
+					end
+				end
+			end
 		end
 	end
 
