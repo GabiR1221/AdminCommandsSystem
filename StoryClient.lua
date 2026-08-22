@@ -12,6 +12,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
+local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -109,9 +110,46 @@ local countdownLabel = gui:WaitForChild("CountdownLabel")
 local taskLabel = gui:WaitForChild("TaskLabel")
 local notificationLabel = gui:WaitForChild("NotificationLabel")
 
+-- A server story action can suppress the complete GUI or selected elements.
+-- Internal state continues updating while hidden, so showing it later restores
+-- the current task/countdown rather than stale text.
+local elementVisibility = {
+	Points = true,
+	Countdown = true,
+	Task = true,
+	Notifications = true,
+	Drawing = true,
+}
+
+local function elementIsEnabled(name)
+	return elementVisibility[name] ~= false
+end
+
+local function applyUiVisibility(payload)
+	local visible = payload.visible == true
+	local elements = payload.elements
+	if type(elements) ~= "table" or #elements == 0 then
+		gui.Enabled = visible
+		return
+	end
+
+	for _, name in ipairs(elements) do
+		if elementVisibility[name] ~= nil then
+			elementVisibility[name] = visible
+		end
+	end
+	collectibleCounter.Visible = elementIsEnabled("Points") and pointsUiUnlocked and required > 0
+	countdownLabel.Visible = elementIsEnabled("Countdown") and countdownEndsAt ~= nil
+	taskLabel.Visible = elementIsEnabled("Task") and taskState ~= nil
+	notificationLabel.Visible = elementIsEnabled("Notifications") and notificationLabel.Text ~= "" and os.clock() < notificationHideAt
+	if task2Gui then
+		task2Gui.Visible = elementIsEnabled("Drawing")
+	end
+end
+
 local function showNotification(text)
 	notificationLabel.Text = tostring(text or "")
-	notificationLabel.Visible = notificationLabel.Text ~= ""
+	notificationLabel.Visible = elementIsEnabled("Notifications") and notificationLabel.Text ~= ""
 	notificationHideAt = os.clock() + UI_CONFIG.NotificationSeconds
 end
 
@@ -122,7 +160,7 @@ local function updateCollectibleCounter()
 	end
 
 	collectibleCounter.Text = string.format("Bani: %d / %d", points, required)
-	collectibleCounter.Visible = true
+	collectibleCounter.Visible = elementIsEnabled("Points")
 end
 
 local function updateTaskLabel()
@@ -143,7 +181,7 @@ local function updateTaskLabel()
 		tostring(taskState.description or ""),
 		progressText
 	)
-	taskLabel.Visible = true
+	taskLabel.Visible = elementIsEnabled("Task")
 end
 
 local function destroyTask2Gui()
@@ -209,6 +247,7 @@ local function createTask2Gui(payload)
 	task2Gui.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 	task2Gui.BorderSizePixel = 0
 	task2Gui.Parent = gui
+	task2Gui.Visible = elementIsEnabled("Drawing")
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 12)
@@ -464,6 +503,144 @@ local function createConversationGui()
 	return textLabel
 end
 
+local function getConversationGlitch(page)
+	local glitch = page.Glitch or page.glitch
+	local shorthandWords = page.GlitchWords or page.glitchWords
+	if type(glitch) ~= "table" and type(shorthandWords) ~= "table" then
+		return nil
+	end
+
+	glitch = type(glitch) == "table" and glitch or {}
+	local words = glitch.Words or glitch.words or shorthandWords
+	if type(words) ~= "table" or #words == 0 then
+		return nil
+	end
+
+	local validWords = {}
+	for _, word in ipairs(words) do
+		word = tostring(word)
+		if word ~= "" and #word <= 64 then
+			table.insert(validWords, word)
+		end
+		if #validWords >= 20 then break end
+	end
+	if #validWords == 0 then return nil end
+
+	local characters = tostring(glitch.Characters or glitch.characters or "#@$%!?01")
+	if characters == "" then characters = "#" end
+	return {
+		words = validWords,
+		chance = math.clamp(tonumber(glitch.Chance or glitch.chance) or 0.4, 0, 1),
+		interval = math.clamp(tonumber(glitch.Interval or glitch.interval) or 0.05, 0.025, 0.5),
+		jitterPixels = math.clamp(math.floor(tonumber(glitch.JitterPixels or glitch.jitterPixels) or 2), 0, 12),
+		characters = string.sub(characters, 1, 64),
+	}
+end
+
+local function getMarkedCharacters(text, glitch)
+	local marked = {}
+	if not glitch then return marked end
+	local lowerText = string.lower(text)
+	for _, word in ipairs(glitch.words) do
+		local searchFrom = 1
+		while true do
+			local first, last = string.find(lowerText, string.lower(word), searchFrom, true)
+			if not first then break end
+			for index = first, last do marked[index] = true end
+			searchFrom = last + 1
+		end
+	end
+	return marked
+end
+
+-- Each visible word gets its own label. This is slightly more work when a page
+-- begins, but lets a scary word move without shifting the surrounding sentence.
+local function layoutConversationWords(textLabel, fullText, glitch)
+	for _, child in ipairs(textLabel:GetChildren()) do
+		if child.Name == "ConversationWord" then child:Destroy() end
+	end
+	textLabel.Text = ""
+	if textLabel.AbsoluteSize.X <= 1 then
+		RunService.RenderStepped:Wait()
+	end
+
+	local availableWidth = math.max(1, textLabel.AbsoluteSize.X)
+	local lineHeight = math.ceil(textLabel.TextSize * 1.25)
+	local spaceWidth = TextService:GetTextSize(" ", textLabel.TextSize, textLabel.Font, Vector2.new(10000, lineHeight)).X
+	local entries = {}
+	local x, y, cursor = 0, 0, 1
+
+	while cursor <= #fullText do
+		local whitespaceStart, whitespaceEnd = string.find(fullText, "%s+", cursor)
+		if whitespaceStart == cursor then
+			local whitespace = string.sub(fullText, whitespaceStart, whitespaceEnd)
+			for index = 1, #whitespace do
+				if string.sub(whitespace, index, index) == "\n" then x, y = 0, y + lineHeight else x += spaceWidth end
+			end
+			cursor = whitespaceEnd + 1
+		end
+		if cursor > #fullText then break end
+
+		local wordStart, wordEnd = string.find(fullText, "%S+", cursor)
+		if wordStart ~= cursor then break end
+		local word = string.sub(fullText, wordStart, wordEnd)
+		local width = math.max(1, TextService:GetTextSize(word, textLabel.TextSize, textLabel.Font, Vector2.new(10000, lineHeight)).X)
+		if x > 0 and x + width > availableWidth then x, y = 0, y + lineHeight end
+
+		local label = Instance.new("TextLabel")
+		label.Name = "ConversationWord"
+		label.BackgroundTransparency = 1
+		label.Font = textLabel.Font
+		label.TextColor3 = textLabel.TextColor3
+		label.TextSize = textLabel.TextSize
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.TextYAlignment = Enum.TextYAlignment.Top
+		label.Size = UDim2.fromOffset(width + 2, lineHeight)
+		label.Position = UDim2.fromOffset(x, y)
+		label.ZIndex = textLabel.ZIndex
+		label.Parent = textLabel
+
+		table.insert(entries, {
+			label = label,
+			text = word,
+			startIndex = wordStart,
+			endIndex = wordEnd,
+			basePosition = label.Position,
+			marked = getMarkedCharacters(word, glitch),
+		})
+		x += width
+		cursor = wordEnd + 1
+	end
+	return entries
+end
+
+local function renderConversationWords(entries, visibleLength, glitch)
+	for _, entry in ipairs(entries) do
+		local count = math.clamp(visibleLength - entry.startIndex + 1, 0, #entry.text)
+		local output, hasVisibleGlitch = table.create(count), false
+		for index = 1, count do
+			local character = string.sub(entry.text, index, index)
+			if entry.marked[index] then
+				hasVisibleGlitch = true
+				if character:match("[%w]") and math.random() < glitch.chance then
+					local replacementIndex = math.random(1, #glitch.characters)
+					character = string.sub(glitch.characters, replacementIndex, replacementIndex)
+				end
+			end
+			output[index] = character
+		end
+		entry.label.Text = table.concat(output)
+		if hasVisibleGlitch and glitch.jitterPixels > 0 then
+			entry.label.Position = entry.basePosition + UDim2.fromOffset(
+				math.random(-glitch.jitterPixels, glitch.jitterPixels),
+				math.random(-glitch.jitterPixels, glitch.jitterPixels)
+			)
+		else
+			entry.label.Position = entry.basePosition
+		end
+	end
+end
+
 local function playConversation(payload)
 	destroyConversationGui()
 	conversationToken += 1
@@ -490,16 +667,22 @@ local function playConversation(payload)
 			end
 
 			local fullText = tostring(page.Text or page.text or "")
-			textLabel.Text = ""
+			local glitch = getConversationGlitch(page)
+			local wordEntries = layoutConversationWords(textLabel, fullText, glitch)
 			for index = 1, #fullText do
 				if token ~= conversationToken then
 					return
 				end
-				textLabel.Text = string.sub(fullText, 1, index)
+				renderConversationWords(wordEntries, index, glitch)
 				task.wait(typewriterSpeed)
 			end
 
-			task.wait(math.max(0, tonumber(page.Duration or page.duration) or 4))
+			local pageEndsAt = os.clock() + math.max(0, tonumber(page.Duration or page.duration) or 4)
+			while token == conversationToken and os.clock() < pageEndsAt do
+				renderConversationWords(wordEntries, #fullText, glitch)
+				task.wait(glitch and glitch.interval or 0.1)
+			end
+			for _, entry in ipairs(wordEntries) do entry.label.Position = entry.basePosition end
 		end
 
 		if token == conversationToken then
@@ -812,7 +995,7 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		showNotification("Te-ai inscris pentru excursie")
 	elseif action == "Countdown" then
 		countdownEndsAt = tonumber(payload.endsAt)
-		countdownLabel.Visible = countdownEndsAt ~= nil
+		countdownLabel.Visible = elementIsEnabled("Countdown") and countdownEndsAt ~= nil
 	elseif action == "HidePoints" then
 		pointsUiUnlocked = false
 		collectibleCounter.Visible = false
@@ -847,6 +1030,8 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		showNotification(payload.message or "Task complete.")
 	elseif action == "Message" then
 		showNotification(payload.text or "")
+	elseif action == "UIVisibility" then
+		applyUiVisibility(payload)
 	end
 end)
 
@@ -854,7 +1039,7 @@ RunService.RenderStepped:Connect(function()
 	if countdownEndsAt then
 		local remaining = math.max(0, math.ceil(countdownEndsAt - Workspace:GetServerTimeNow()))
 		countdownLabel.Text = string.format("Excursia incepe in: %02d:%02d", math.floor(remaining / 60), remaining % 60)
-		countdownLabel.Visible = remaining > 0
+		countdownLabel.Visible = elementIsEnabled("Countdown") and remaining > 0
 		if remaining <= 0 then
 			countdownEndsAt = nil
 		end
