@@ -13,67 +13,14 @@ local tool = script.Parent
 local HAND_ATTACHMENT_NAME = tool:GetAttribute("HandAttachmentName") or "ToolGrip"
 local HANDLE_ATTACHMENT_NAME = "HandleAttachment"
 local BINDING_NAME = "SkinnedTool_" .. HttpService:GenerateGUID(false)
-local DEFAULT_HOLD_ANIMATION_ID = "rbxassetid://140339180147790"
 
 local isBound = false
-local holdTrack = nil
-local holdAnimation = nil
-
-local function stopHoldAnimation()
-	if holdTrack then
-		holdTrack:Stop(0.15)
-		holdTrack:Destroy()
-		holdTrack = nil
-	end
-	if holdAnimation then
-		holdAnimation:Destroy()
-		holdAnimation = nil
-	end
-end
 
 local function unbind()
 	if isBound then
 		RunService:UnbindFromRenderStep(BINDING_NAME)
 		isBound = false
 	end
-end
-
-local function playHoldAnimation(character)
-	stopHoldAnimation()
-
-	local animationId = tool:GetAttribute("HoldAnimationId")
-	if animationId == nil then
-		animationId = DEFAULT_HOLD_ANIMATION_ID
-	end
-	if typeof(animationId) == "number" then
-		animationId = "rbxassetid://" .. tostring(animationId)
-	end
-	if typeof(animationId) ~= "string" or animationId == "" then
-		return
-	end
-	if not animationId:match("^rbxassetid://%d+$") then
-		warn(("%s has an invalid HoldAnimationId: %s"):format(tool:GetFullName(), tostring(animationId)))
-		return
-	end
-
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
-		warn(("%s cannot play its hold animation because the character has no server-created Animator")
-			:format(tool:GetFullName()))
-		return
-	end
-
-	-- Player-character animations loaded on its server-created Animator replicate
-	-- from the owning client. Loading locally also starts in the same visual frame
-	-- as the locally evaluated skinned bones.
-	holdAnimation = Instance.new("Animation")
-	holdAnimation.Name = "ToolHoldAnimation"
-	holdAnimation.AnimationId = animationId
-	holdTrack = animator:LoadAnimation(holdAnimation)
-	holdTrack.Priority = Enum.AnimationPriority.Action
-	holdTrack.Looped = true
-	holdTrack:Play(0.15)
 end
 
 local function findHandAttachment(character)
@@ -95,10 +42,6 @@ local function beginLocalAlignment()
 	local handle = tool:FindFirstChild("Handle")
 	local handleAttachment = handle and handle:FindFirstChild(HANDLE_ATTACHMENT_NAME)
 	local handAttachment = character and findHandAttachment(character)
-
-	if tool.Parent == character then
-		playHoldAnimation(character)
-	end
 
 	-- The server Script reports detailed setup warnings. Silently returning here
 	-- avoids showing every client warnings for a Tool that it does not own.
@@ -133,11 +76,5 @@ local function beginLocalAlignment()
 end
 
 tool.Equipped:Connect(beginLocalAlignment)
-tool.Unequipped:Connect(function()
-	unbind()
-	stopHoldAnimation()
-end)
-tool.Destroying:Connect(function()
-	unbind()
-	stopHoldAnimation()
-end)
+tool.Unequipped:Connect(unbind)
+tool.Destroying:Connect(unbind)
