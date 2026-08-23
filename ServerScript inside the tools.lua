@@ -9,10 +9,13 @@ local RunService = game:GetService("RunService")
 local tool = script.Parent
 local HAND_ATTACHMENT_NAME = tool:GetAttribute("HandAttachmentName") or "ToolGrip"
 local HANDLE_ATTACHMENT_NAME = "HandleAttachment"
+local DEFAULT_HOLD_ANIMATION_ID = "rbxassetid://123137603809441"
 
 local updateConnection = nil
 local equippedHandle = nil
 local originalHandleProperties = nil
+local holdTrack = nil
+local holdAnimation = nil
 
 local function disconnectUpdate()
 	if updateConnection then
@@ -32,9 +35,78 @@ local function restoreHandle()
 	originalHandleProperties = nil
 end
 
+local function stopHoldAnimation()
+	if holdTrack then
+		holdTrack:Stop(0.15)
+		holdTrack:Destroy()
+		holdTrack = nil
+	end
+	if holdAnimation then
+		holdAnimation:Destroy()
+		holdAnimation = nil
+	end
+end
+
 local function cleanup()
 	disconnectUpdate()
+	stopHoldAnimation()
 	restoreHandle()
+end
+
+local function getHoldAnimationId()
+	local animationId = tool:GetAttribute("HoldAnimationId")
+	if animationId == nil then
+		animationId = DEFAULT_HOLD_ANIMATION_ID
+	elseif typeof(animationId) == "number" then
+		animationId = "rbxassetid://" .. tostring(animationId)
+	end
+
+	if typeof(animationId) ~= "string" or animationId == "" then
+		return nil
+	end
+	if not animationId:match("^rbxassetid://%d+$") then
+		warn(("%s has an invalid HoldAnimationId: %s"):format(tool:GetFullName(), tostring(animationId)))
+		return nil
+	end
+	return animationId
+end
+
+local function playHoldAnimation(humanoid)
+	local animationId = getHoldAnimationId()
+	if not animationId then
+		return
+	end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		-- Creating the Animator on the server is important: tracks loaded through a
+		-- client-created Animator do not replicate correctly.
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	holdAnimation = Instance.new("Animation")
+	holdAnimation.Name = "ToolHoldAnimation"
+	holdAnimation.AnimationId = animationId
+
+	local loaded, result = pcall(function()
+		return animator:LoadAnimation(holdAnimation)
+	end)
+	if not loaded then
+		warn(("Could not load hold animation %s for %s: %s"):format(
+			animationId,
+			tool:GetFullName(),
+			tostring(result)
+			))
+		holdAnimation:Destroy()
+		holdAnimation = nil
+		return
+	end
+
+	holdTrack = result
+	holdTrack.Priority = Enum.AnimationPriority.Action4
+	holdTrack.Looped = true
+	holdTrack:Play(0.15, 1, 1)
 end
 
 local function findHandAttachment(character)
@@ -57,8 +129,17 @@ tool.Equipped:Connect(function()
 	local handle = tool:FindFirstChild("Handle")
 	local handAttachment = character and findHandAttachment(character)
 
-	if not humanoid or not handle or not handle:IsA("BasePart") then
-		warn(("%s needs a Humanoid and a BasePart named Handle"):format(tool:GetFullName()))
+	if not humanoid then
+		warn(("%s needs a Humanoid in its character"):format(tool:GetFullName()))
+		return
+	end
+
+	-- Start the animation before validating the custom grip. A grip setup error
+	-- must never prevent the independent hold animation from playing.
+	playHoldAnimation(humanoid)
+
+	if not handle or not handle:IsA("BasePart") then
+		warn(("%s needs a BasePart named Handle"):format(tool:GetFullName()))
 		return
 	end
 	if not handAttachment then
