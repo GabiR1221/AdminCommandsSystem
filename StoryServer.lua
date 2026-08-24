@@ -337,6 +337,8 @@ local CONFIG = {
 			Description = "...",
 			Duration = 150,
 			StartActions = {
+				{ Type = "LoadMap", MapName = "DRSJason", LoadedName = "DRSJasonLoaded", Delay = 1 },
+				{ Type = "Teleport", PartName = "CabanaTeleportPartCutscene", Delay = 1 },
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 				{
 					Type = "Cutscene",
@@ -371,7 +373,6 @@ local CONFIG = {
 				},
 			},
 			EndActions = {
-				{ Type = "LoadMap", MapName = "police", LoadedName = "policeLoaded", Delay = 1 },
 				{ Type = "CloseCutscene", Delay = 1 }
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
