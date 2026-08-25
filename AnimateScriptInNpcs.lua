@@ -1,347 +1,282 @@
--- Server Script: animation and server-authoritative NPC following.
--- Put this Script directly inside an NPC model containing a Humanoid and HumanoidRootPart.
-
-local CollectionService = game:GetService("CollectionService")
-local PathfindingService = game:GetService("PathfindingService")
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-
+---drd Animate Localscript
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local player = game.Players.LocalPlayer
 local character = script.Parent
 local humanoid = character:WaitForChild("Humanoid")
-local root = character:WaitForChild("HumanoidRootPart")
-local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+local animator = humanoid:WaitForChild("Animator")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
--- This controller must be a server Script. A LocalScript inside a workspace NPC
--- does not have a valid execution context and will never run the follower loop.
-if not script:IsA("Script") then
-	warn(("NPCFollower: %s must use a Script, not a LocalScript."):format(character:GetFullName()))
-	return
-end
+character:SetAttribute("MorphType", "DrD")
 
-character:SetAttribute("NPCFollowerRunning", true)
+-- ⚙️ Speed Settings
+local normalWalkSpeed = 16
+local sprintSpeed = 36
+local isSprinting = false
+local isEmoting = false -- New Emote Lock Variable
 
-local CONFIG = {
-	DetectionRadius = character:GetAttribute("DetectionRadius") or 120,
-	StopDistance = character:GetAttribute("StopDistance") or 2,
-	RepathInterval = character:GetAttribute("RepathInterval") or 0.75,
-	TargetMoveThreshold = character:GetAttribute("TargetMoveThreshold") or 5,
-	WaypointTimeout = character:GetAttribute("WaypointTimeout") or 2.5,
-	AgentRadius = character:GetAttribute("AgentRadius") or 2.5,
-	AgentHeight = character:GetAttribute("AgentHeight") or 5,
-	AgentCanJump = character:GetAttribute("AgentCanJump") ~= false,
-	SeparationRadius = character:GetAttribute("SeparationRadius") or 6,
-	SeparationStrength = character:GetAttribute("SeparationStrength") or 3,
+-- Footsteps are cosmetic and are intentionally controlled by this LocalScript.
+-- This keeps network traffic at zero and makes the sound match the animation as
+-- perceived by the morphed player without trusting client input on the server.
+local FOOTSTEP_SOUND_ID = "rbxassetid://91882016473062"
+local FOOTSTEP_VOLUME = 0.33
+local FOOTSTEP_ROLLOFF_MAX_DISTANCE = 55
+local WALK_CYCLE_SPEED = 16 -- speed at which the uploaded walk animation was authored
+local SPRINT_CYCLE_SPEED = 36
+local FALLBACK_STEP_DISTANCE = 4.5 -- studs between individual footfalls
+local STEP_MARKER_NAMES = { "Footstep", "LeftFootstep", "RightFootstep" }
+
+-- Set default speed on spawn
+humanoid.WalkSpeed = normalWalkSpeed
+
+-- 1. Create Animation Objects
+local anims = {
+	Idle = Instance.new("Animation"),
+	Walk = Instance.new("Animation"),
+	Sprint = Instance.new("Animation"), 
+	Jump = Instance.new("Animation"),
+	Fall = Instance.new("Animation"),
+	Emote = Instance.new("Animation") -- Added Emote
 }
 
-local animations = {
-	Idle = "rbxassetid://12191569041347",
-	Walk = "rbxassetid://12656507759730",
-	Jump = "rbxassetid://11166710145361",
-}
+-- 🛑 REPLACE IDs HERE 🛑
+anims.Idle.AnimationId = "rbxassetid://12191569041347"
+anims.Walk.AnimationId = "rbxassetid://123282108256275"--  126565077597307
+anims.Sprint.AnimationId = "rbxassetid://105803049139607" 
+anims.Jump.AnimationId = "rbxassetid://111667101453616"
+anims.Fall.AnimationId = "rbxassetid://138130156212936"
 
-local tracks = {}
-for name, animationId in pairs(animations) do
-	local animation = Instance.new("Animation")
-	animation.AnimationId = animationId
-	local track = animator:LoadAnimation(animation)
-	track.Looped = name ~= "Jump"
-	track.Priority = name == "Jump" and Enum.AnimationPriority.Action or Enum.AnimationPriority.Movement
-	tracks[name] = track
-	animation:Destroy()
+anims.Emote.AnimationId = "rbxassetid://93888878701091" -- <--- PUT EMOTE ID HERE
+
+-- 2. Load Animations onto the Animator
+local tracks = {
+	Idle = animator:LoadAnimation(anims.Idle),
+	Walk = animator:LoadAnimation(anims.Walk),
+	Sprint = animator:LoadAnimation(anims.Sprint), 
+	Jump = animator:LoadAnimation(anims.Jump),
+	Fall = animator:LoadAnimation(anims.Fall)
+}
+-- We load the Emote separately so it doesn't get accidentally stopped by the Idle track
+local emoteTrack = animator:LoadAnimation(anims.Emote)
+
+-- Animation markers are the most accurate way to synchronize footsteps. In the
+-- Animation Editor, add LeftFootstep and RightFootstep events on foot contact.
+-- The distance-based fallback below also works when the animations have no events.
+local leftFoot = character:FindFirstChild("LeftFoot", true)
+local rightFoot = character:FindFirstChild("RightFoot", true)
+local nextFootIsLeft = true
+local distanceSinceStep = 0
+local lastMarkerStepAt = -math.huge
+
+local function makeFootstepSound(parent, name)
+	local configuredSoundId = character:GetAttribute("FootstepSoundId")
+	local configuredVolume = character:GetAttribute("FootstepVolume")
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = typeof(configuredSoundId) == "string" and configuredSoundId or FOOTSTEP_SOUND_ID
+	sound.Volume = typeof(configuredVolume) == "number"
+		and math.clamp(configuredVolume, 0, 3)
+		or FOOTSTEP_VOLUME
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	sound.RollOffMinDistance = 5
+	sound.RollOffMaxDistance = FOOTSTEP_ROLLOFF_MAX_DISTANCE
+	sound.Parent = parent
+	return sound
 end
 
-local currentTrack
-local function play(track)
-	if currentTrack == track then
+local leftSound = makeFootstepSound(leftFoot or rootPart, "MorphLeftFootstep")
+local rightSound = makeFootstepSound(rightFoot or rootPart, "MorphRightFootstep")
+
+-- Roblox's RbxCharacterSounds creates a looping sound named Running. Leaving it
+-- enabled produces the old, continuous footsteps on top of these timed steps.
+local function muteDefaultRunningSound(child)
+	if child:IsA("Sound") and child.Name == "Running" then
+		child.SoundId = ""
+		child.Volume = 0
+		child:Stop()
+	end
+end
+
+for _, child in ipairs(rootPart:GetChildren()) do
+	muteDefaultRunningSound(child)
+end
+rootPart.ChildAdded:Connect(muteDefaultRunningSound)
+
+local function isGroundedAndMoving()
+	local state = humanoid:GetState()
+	return humanoid.Health > 0
+		and humanoid.MoveDirection.Magnitude > 0.05
+		and humanoid.FloorMaterial ~= Enum.Material.Air
+		and state ~= Enum.HumanoidStateType.Jumping
+		and state ~= Enum.HumanoidStateType.Freefall
+		and state ~= Enum.HumanoidStateType.Swimming
+end
+
+local function playFootstep(requestedFoot)
+	if not isGroundedAndMoving() then
 		return
 	end
-	if currentTrack then
-		currentTrack:Stop(0.2)
-	end
-	track:Play(0.2)
-	currentTrack = track
+
+	local useLeft = requestedFoot == "Left" or (requestedFoot == nil and nextFootIsLeft)
+	local sound = useLeft and leftSound or rightSound
+	nextFootIsLeft = not useLeft
+	distanceSinceStep = 0
+
+	-- Small deterministic bounds keep repeated steps natural without creating or
+	-- destroying Sound instances every frame.
+	sound.PlaybackSpeed = 0.96 + math.random() * 0.08
+	sound.TimePosition = 0
+	sound:Play()
 end
 
+local function connectFootstepMarkers(track)
+	for _, markerName in ipairs(STEP_MARKER_NAMES) do
+		track:GetMarkerReachedSignal(markerName):Connect(function()
+			lastMarkerStepAt = time()
+			if markerName == "LeftFootstep" then
+				playFootstep("Left")
+			elseif markerName == "RightFootstep" then
+				playFootstep("Right")
+			else
+				playFootstep()
+			end
+		end)
+	end
+end
+
+connectFootstepMarkers(tracks.Walk)
+connectFootstepMarkers(tracks.Sprint)
+
+-- Helper function to crossfade animations smoothly
+local function playTrack(trackToPlay)
+	-- If we try to walk, sprint, jump, or fall, cancel the emote!
+	if isEmoting and trackToPlay ~= tracks.Idle then
+		emoteTrack:Stop(0.2)
+	end
+
+	for name, track in pairs(tracks) do
+		if track ~= trackToPlay and track.IsPlaying then
+			track:Stop(0.2) 
+		end
+	end
+	if not trackToPlay.IsPlaying then
+		trackToPlay:Play(0.2)
+	end
+end
+
+-- 3. Handle Running vs Sprinting vs Idling
 humanoid.Running:Connect(function(speed)
-	play(speed > 0.1 and tracks.Walk or tracks.Idle)
+	local currentState = humanoid:GetState()
+	if currentState == Enum.HumanoidStateType.Freefall or currentState == Enum.HumanoidStateType.Jumping then
+		return 
+	end
+
+	if speed > 0.1 then
+		if isSprinting then
+			playTrack(tracks.Sprint)
+			tracks.Sprint:AdjustSpeed(math.clamp(speed / SPRINT_CYCLE_SPEED, 0.5, 2))
+		else
+			playTrack(tracks.Walk)
+			tracks.Walk:AdjustSpeed(math.clamp(speed / WALK_CYCLE_SPEED, 0.5, 2))
+		end
+	else
+		playTrack(tracks.Idle)
+	end
 end)
-humanoid.Jumping:Connect(function()
-	play(tracks.Jump)
+
+-- Marker-free animations use distance travelled rather than a timer. Steps
+-- therefore stay aligned when WalkSpeed, slopes, buffs, or character scale change.
+RunService.Heartbeat:Connect(function(deltaTime)
+	if not isGroundedAndMoving() then
+		distanceSinceStep = 0
+		return
+	end
+
+	-- Once a marker has fired recently, markers own synchronization. If an
+	-- animation is swapped at runtime and no longer has markers, fallback resumes.
+	if time() - lastMarkerStepAt < 1 then
+		return
+	end
+
+	local horizontalVelocity = Vector3.new(
+		rootPart.AssemblyLinearVelocity.X,
+		0,
+		rootPart.AssemblyLinearVelocity.Z
+	).Magnitude
+	distanceSinceStep += horizontalVelocity * math.min(deltaTime, 0.1)
+	if distanceSinceStep >= FALLBACK_STEP_DISTANCE then
+		playFootstep()
+	end
 end)
-play(tracks.Idle)
 
--- Network ownership applies to the whole welded assembly. CanSetNetworkOwnership
--- avoids terminating the entire AI when a badly rigged NPC is welded to an
--- anchored part; pathfinding can still start and Studio Output gets a useful warning.
-local canSetOwnership, ownershipReason = root:CanSetNetworkOwnership()
-if canSetOwnership then
-	root:SetNetworkOwner(nil)
-else
-	warn(("NPCFollower: Could not set server network ownership for %s: %s")
-		:format(character:GetFullName(), tostring(ownershipReason)))
-end
-CollectionService:AddTag(character, "FollowingNPC")
+-- 4. Handle Jumping, Falling, and Landing
+humanoid.StateChanged:Connect(function(oldState, newState)
+	if newState == Enum.HumanoidStateType.Jumping then
+		playTrack(tracks.Jump)
 
-local pathParams = {
-	AgentRadius = CONFIG.AgentRadius,
-	AgentHeight = CONFIG.AgentHeight,
-	AgentCanJump = CONFIG.AgentCanJump,
-	WaypointSpacing = 4,
-	Costs = {
-		NPCForbidden = math.huge,
-	},
-}
+	elseif newState == Enum.HumanoidStateType.Freefall then
+		playTrack(tracks.Fall)
 
-local function getEligibleTarget(player)
-	local targetCharacter = player.Character
-	local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
-	local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
-	if not targetHumanoid or targetHumanoid.Health <= 0 or not targetRoot then
-		return nil
+	elseif newState == Enum.HumanoidStateType.Landed then
+		if humanoid.MoveDirection.Magnitude > 0 then
+			if isSprinting then
+				playTrack(tracks.Sprint)
+			else
+				playTrack(tracks.Walk)
+			end
+		else
+			playTrack(tracks.Idle)
+		end
 	end
-	if targetCharacter:GetAttribute("IgnoreNPCs") then
-		return nil
-	end
+end)
 
-	-- Do not chase targets through water or toward positions which are not on a
-	-- walkable surface. FloorMaterial also covers freefall and most jump states;
-	-- checking Swimming explicitly handles characters at the bottom of water.
-	local targetState = targetHumanoid:GetState()
-	if targetState == Enum.HumanoidStateType.Swimming
-		or targetHumanoid.FloorMaterial == Enum.Material.Air then
-		return nil
-	end
-	return targetRoot
-end
+-- 5. User Input Detection (Shift & E)
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+	if gameProcessedEvent then return end -- Ignores if typing in chat
 
-local function candidatePlayers()
-	local candidates = {}
-	for _, player in ipairs(Players:GetPlayers()) do
-		local targetRoot = getEligibleTarget(player)
-		if targetRoot then
-			local distance = (targetRoot.Position - root.Position).Magnitude
-			if distance <= CONFIG.DetectionRadius then
-				table.insert(candidates, { player = player, distance = distance })
+	--[[ SPRINT LOGIC
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.LeftAlt then
+		isSprinting = true
+		humanoid.WalkSpeed = sprintSpeed
+
+		local currentState = humanoid:GetState()
+		if currentState ~= Enum.HumanoidStateType.Freefall and currentState ~= Enum.HumanoidStateType.Jumping then
+			if humanoid.MoveDirection.Magnitude > 0 then
+				playTrack(tracks.Sprint)
+			end
+		end
+	end]]
+
+	-- EMOTE LOGIC
+	if input.KeyCode == Enum.KeyCode.E then
+		-- Only play if we aren't already emoting, and we aren't falling/jumping
+		local currentState = humanoid:GetState()
+		if not isEmoting and currentState ~= Enum.HumanoidStateType.Freefall and currentState ~= Enum.HumanoidStateType.Jumping then
+			isEmoting = true
+			emoteTrack:Play(0.2)
+
+			-- This line halts the E key logic until the animation naturally finishes OR is canceled by walking
+			emoteTrack.Stopped:Wait() 
+
+			isEmoting = false -- Unlocks the ability to emote again
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessedEvent)
+	-- SPRINT STOP LOGIC
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		isSprinting = false
+		humanoid.WalkSpeed = normalWalkSpeed
+
+		local currentState = humanoid:GetState()
+		if currentState ~= Enum.HumanoidStateType.Freefall and currentState ~= Enum.HumanoidStateType.Jumping then
+			if humanoid.MoveDirection.Magnitude > 0 then
+				playTrack(tracks.Walk)
 			end
 		end
 	end
-	table.sort(candidates, function(a, b)
-		return a.distance < b.distance
-	end)
-	return candidates
-end
+end)
 
-local function computePath(destination)
-	local path = PathfindingService:CreatePath(pathParams)
-	local ok, errorMessage = pcall(function()
-		path:ComputeAsync(root.Position, destination)
-	end)
-	if ok and path.Status == Enum.PathStatus.Success then
-		return path
-	end
-	if not ok then
-		warn(("NPCFollower: Path computation failed for %s: %s")
-			:format(character:GetFullName(), tostring(errorMessage)))
-	end
-	return nil
-end
-
-local function crossesForbiddenVolume(destination, targetCharacter)
-	local delta = destination - root.Position
-	local distance = delta.Magnitude
-	if distance < 0.1 then
-		return false
-	end
-
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = { character, targetCharacter }
-	local center = root.Position + delta * 0.5
-	local scanCFrame = CFrame.lookAt(center, destination)
-	local scanSize = Vector3.new(CONFIG.AgentRadius * 2, CONFIG.AgentHeight, distance)
-	for _, part in ipairs(Workspace:GetPartBoundsInBox(scanCFrame, scanSize, overlapParams)) do
-		local modifier = part:FindFirstChildOfClass("PathfindingModifier")
-		if modifier and modifier.Label == "NPCForbidden" then
-			return true
-		end
-	end
-	return false
-end
-
--- Pathfinding can occasionally reject a route because decorative/query geometry
--- influenced the navigation mesh even though the geometry is non-collidable. A
--- collision-respecting line test provides a safe direct fallback: it ignores
--- CanCollide=false decoration, but never ignores a real wall or NPCForbidden zone.
-local function hasClearDirectRoute(destination, targetCharacter)
-	if crossesForbiddenVolume(destination, targetCharacter) then
-		return false
-	end
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = { character, targetCharacter }
-	rayParams.RespectCanCollide = true
-	local origin = root.Position + Vector3.new(0, 1, 0)
-	local direction = (destination + Vector3.new(0, 1, 0)) - origin
-	local right = direction.Magnitude > 0.1 and direction.Unit:Cross(Vector3.yAxis) or Vector3.xAxis
-	for _, offset in ipairs({ Vector3.zero, right * CONFIG.AgentRadius, -right * CONFIG.AgentRadius }) do
-		if Workspace:Raycast(origin + offset, direction, rayParams) then
-			return false
-		end
-	end
-
-	-- A clear horizontal ray alone could cross a pit. Sample supporting ground so
-	-- direct movement is only used across continuous, non-water walking surface.
-	local sampleCount = math.clamp(math.ceil(direction.Magnitude / 4), 1, 30)
-	for sampleIndex = 0, sampleCount do
-		local alpha = sampleIndex / sampleCount
-		local samplePosition = root.Position:Lerp(destination, alpha)
-		local sampleOrigin = samplePosition + Vector3.new(0, CONFIG.AgentHeight, 0)
-		local ground = Workspace:Raycast(
-			sampleOrigin,
-			Vector3.new(0, -(CONFIG.AgentHeight * 2 + 4), 0),
-			rayParams
-		)
-		if not ground or ground.Material == Enum.Material.Water then
-			return false
-		end
-	end
-	return true
-end
-
--- Pick the nearest reachable player. NPCForbidden modifiers make a bridge or
--- other unsafe region unreachable, so the next candidate is tried automatically.
-local function chooseTargetAndPath()
-	for _, candidate in ipairs(candidatePlayers()) do
-		local targetRoot = getEligibleTarget(candidate.player)
-		if targetRoot then
-			if hasClearDirectRoute(targetRoot.Position, targetRoot.Parent) then
-				return candidate.player, nil, targetRoot.Position, true
-			end
-			local path = computePath(targetRoot.Position)
-			if path then
-				return candidate.player, path, targetRoot.Position, false
-			end
-		end
-	end
-	return nil, nil, nil, false
-end
-
-local function separationOffset()
-	local offset = Vector3.zero
-	for _, other in ipairs(CollectionService:GetTagged("FollowingNPC")) do
-		if other ~= character and other:IsA("Model") then
-			local otherRoot = other:FindFirstChild("HumanoidRootPart")
-			if otherRoot then
-				local delta = root.Position - otherRoot.Position
-				local flatDelta = Vector3.new(delta.X, 0, delta.Z)
-				local distance = flatDelta.Magnitude
-				if distance > 0.05 and distance < CONFIG.SeparationRadius then
-					offset += flatDelta.Unit * (1 - distance / CONFIG.SeparationRadius) * CONFIG.SeparationStrength
-				end
-			end
-		end
-	end
-	return offset
-end
-
-local function moveToWaypoint(position, targetPlayer, plannedTargetPosition)
-	local finished = false
-	local reached = false
-	local outcome
-	local connection = humanoid.MoveToFinished:Connect(function(didReach)
-		finished = true
-		reached = didReach
-	end)
-	humanoid:MoveTo(position + separationOffset())
-	local startedAt = time()
-	while not finished and time() - startedAt < CONFIG.WaypointTimeout and humanoid.Health > 0 do
-		local targetRoot = getEligibleTarget(targetPlayer)
-		if not targetRoot then
-			outcome = "TargetInvalid"
-			break
-		end
-		if (targetRoot.Position - root.Position).Magnitude <= CONFIG.StopDistance then
-			outcome = "InRange"
-			break
-		end
-		if time() - startedAt >= CONFIG.RepathInterval
-			and (targetRoot.Position - plannedTargetPosition).Magnitude >= CONFIG.TargetMoveThreshold then
-			-- Leave the current MoveTo active while ComputeAsync builds the next
-			-- route. This is what prevents the old one-step/start-stop movement.
-			outcome = "Repath"
-			break
-		end
-		task.wait(0.05)
-	end
-	connection:Disconnect()
-	return outcome or (reached and "Reached" or "Stuck")
-end
-
-local function stopMoving()
-	humanoid:MoveTo(root.Position)
-	-- Remove only horizontal drift. Keeping Y velocity avoids fighting gravity,
-	-- slopes, jumping, or the Humanoid's floor solver.
-	local velocity = root.AssemblyLinearVelocity
-	root.AssemblyLinearVelocity = Vector3.new(0, velocity.Y, 0)
-	root.AssemblyAngularVelocity = Vector3.zero
-end
-
-while character.Parent and humanoid.Health > 0 do
-	local targetPlayer, path, plannedTargetPosition, useDirectRoute = chooseTargetAndPath()
-	if not targetPlayer then
-		stopMoving()
-		play(tracks.Idle)
-		task.wait(CONFIG.RepathInterval)
-		continue
-	end
-	if useDirectRoute then
-		local result = moveToWaypoint(plannedTargetPosition, targetPlayer, plannedTargetPosition)
-		if result == "TargetInvalid" or result == "InRange" then
-			stopMoving()
-		end
-		if result == "InRange" then
-			task.wait(CONFIG.RepathInterval)
-		end
-		continue
-	end
-
-	local blockedWaypointIndex
-	local currentWaypointIndex = 1
-	local reachedFollowDistance = false
-	local blockedConnection = path.Blocked:Connect(function(waypointIndex)
-		if waypointIndex >= currentWaypointIndex then
-			blockedWaypointIndex = waypointIndex
-		end
-	end)
-	for waypointIndex, waypoint in ipairs(path:GetWaypoints()) do
-		currentWaypointIndex = waypointIndex
-		local targetRoot = getEligibleTarget(targetPlayer)
-		if not targetRoot or (blockedWaypointIndex and blockedWaypointIndex >= waypointIndex) then
-			break
-		end
-		if (targetRoot.Position - root.Position).Magnitude <= CONFIG.StopDistance then
-			stopMoving()
-			reachedFollowDistance = true
-			break
-		end
-		if waypoint.Action == Enum.PathWaypointAction.Jump then
-			humanoid.Jump = true
-		end
-		local result = moveToWaypoint(waypoint.Position, targetPlayer, plannedTargetPosition)
-		if result ~= "Reached" then
-			if result == "TargetInvalid" or result == "InRange" then
-				stopMoving()
-			end
-			if result == "InRange" then
-				reachedFollowDistance = true
-			end
-			break
-		end
-	end
-	blockedConnection:Disconnect()
-	if reachedFollowDistance then
-		task.wait(CONFIG.RepathInterval)
-	end
-end
-
-CollectionService:RemoveTag(character, "FollowingNPC")
+-- 6. Kickstart the Idle animation
+playTrack(tracks.Idle)
