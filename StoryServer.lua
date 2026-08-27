@@ -227,7 +227,7 @@ local CONFIG = {
 			Duration = 15,
 			StartActions = {
 				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 3, FadeOutSeconds = 1, Text = "Dupa ceva timp...." },
-				{ Type = "LoadMap", MapName = "TacauCityResidence", LoadedName = "LoadedStoryMap", Delay = 1 },
+				{ Type = "LoadMap", MapName = "TacauCityResidence", LoadedName = "Tacaul", Delay = 1 },
 				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
 				{ Type = "SetUIVisible", Visible = true, Delay = "3", Elements = { "Task", "Notifications" } },
 			},
@@ -335,45 +335,135 @@ local CONFIG = {
 			Type = "Wait",
 			Title = "...",
 			Description = "...",
-			Duration = 150,
+			Duration = 81.6,
 			StartActions = {
-				{ Type = "LoadMap", MapName = "DRSJason", LoadedName = "DRSJasonLoaded", Delay = 1 },
-				{ Type = "Teleport", PartName = "CabanaTeleportPartCutscene", Delay = 1 },
+				{ Type = "LoadMap", MapName = "Adormitii", LoadedName = "AdormitiiLoaded"},
+				{ Type = "UnLoadMap", MapName = "Adormitii", LoadedName = "AdormitiiLoaded", Delay = 55 },
+				{ Type = "LoadMap", MapName = "AnimatiiCabana", LoadedName = "AnimatiiCabanaLoaded"},
+				{ Type = "Teleport", PartName = "CabanaTeleportPartCutscene"},
+				{
+					Type = "PlayAnimation",
+					ModelName = "Door",
+					AnimationName = "DoorAnimation",
+					ModelRootName = "Tacaul", -- must match LoadMap.LoadedName
+					TrackName = "door", -- unique ID used to stop/replace this track
+					Looped = false,
+					Speed = 1,
+					Priority = "Action",
+					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				{
+					Type = "PlayAnimation",
+					ModelName = "drs3013",
+					AnimationName = "Jasonteanu",
+					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
+					TrackName = "jasonteanu", -- unique ID used to stop/replace this track
+					Looped = false,
+					Speed = 1,
+					Priority = "Action",
+					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				{
+					Type = "PlayAnimation",
+					ModelName = "DoamnaNAnimatieCabana",
+					AnimationName = "NazCabana",
+					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
+					TrackName = "nazcabana", -- unique ID used to stop/replace this track
+					Looped = false,
+					Speed = 1,
+					Priority = "Action",
+					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				
+				
+				
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 				{
 					Type = "Cutscene",
-					Delay = 1,                  -- optional delay before the whole action
 					FreezeControls = true,      -- default true
 					Shots = {
 						{
-							CameraPartName = "CabanaCamera1",
-							MoveDuration = 0,   -- 0 snaps to this point
-							HoldDuration = 5,
+							-- CameraRig is a Model in Workspace with an AnimationController,
+							-- Animator, CameraPart, and Animation. The client follows CameraPart
+							-- every rendered frame while the animation plays.
+							CameraModelName = "CameraPartCabana",
+							CameraPartName = "CutsceneCameraPart",
+							AnimationName = "Cabana1Animation",
+							Duration = 81.6,
 							FieldOfView = 70,
-						},
-						{
-							CameraPartName = "CabanaCamera2",
-							MoveDuration = 2,
-							HoldDuration = 5,
-							EasingStyle = "Sine",
-							EasingDirection = "InOut",
-							FieldOfView = 80,
+							Looped = false,
 						},
 					},
 					Events = {
 						{
 							Type = "BlackScreen",
-							Time = 8,
+							Time = 3.6,
 							TransitionType = "Wink", -- top/bottom eyelids close and open
 							FadeInSeconds = 0.25,
 							HoldSeconds = 1,
 							FadeOutSeconds = 0.4,
 						},
+						{
+							Type = "BlackScreen",
+							Time = 13,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.25,
+							HoldSeconds = 0.55,
+							FadeOutSeconds = 0.2,
+						},
+						{
+							Type = "BlackScreen",
+							Time = 17,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.15,
+							HoldSeconds = 0.3,
+							FadeOutSeconds = 0.2,
+						},
+						{
+							Type = "BlackScreen",
+							Time = 23.6,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.25,
+							HoldSeconds = 0.55,
+							FadeOutSeconds = 0.2,
+						},
+						{
+							Type = "BlackScreen",
+							Time = 40,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.2,
+							HoldSeconds = 0.3,
+							FadeOutSeconds = 0.2,
+						},
+						{
+							Type = "BlackScreen",
+							Time = 59,
+							TransitionType = "Normal", -- normal blackscreen
+							FadeInSeconds = 0,
+							HoldSeconds = 0.45,
+							FadeOutSeconds = 0.1,
+						},
+						{
+							Type = "BlackScreen",
+							Time = 61.2,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.25,
+							HoldSeconds = 0.55,
+							FadeOutSeconds = 0.2,
+						},
+						{
+							Type = "BlackScreen",
+							Time = 71.4,
+							TransitionType = "Wink", -- top/bottom eyelids close and open
+							FadeInSeconds = 0.25,
+							HoldSeconds = 0.55,
+							FadeOutSeconds = 0.2,
+						},
 					},
 				},
 			},
 			EndActions = {
-				{ Type = "CloseCutscene", Delay = 1 }
+				{ Type = "CloseCutscene", }
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
 		},
@@ -1090,6 +1180,47 @@ local function getCutsceneSoundPayload(soundName)
 	}
 end
 
+local function getCutsceneRigPayload(shot)
+	local modelName = tostring(shot.CameraModelName or "")
+	if modelName == "" then return nil end
+
+	local searchRoot = Workspace
+	local rootName = tostring(shot.ModelRootName or "")
+	if rootName ~= "" then
+		searchRoot = Workspace:FindFirstChild(rootName)
+		if not searchRoot then
+			warn("StoryHorror: Missing camera rig root named " .. rootName)
+			return nil
+		end
+	end
+
+	local model = searchRoot:FindFirstChild(modelName, true)
+	if not model or not model:IsA("Model") then
+		warn("StoryHorror: Missing camera rig Model named " .. modelName)
+		return nil
+	end
+
+	local cameraPartName = tostring(shot.CameraPartName or "CameraPart")
+	local cameraPart = model:FindFirstChild(cameraPartName, true)
+	if not cameraPart or not cameraPart:IsA("BasePart") then
+		warn("StoryHorror: Camera rig " .. modelName .. " is missing BasePart " .. cameraPartName)
+		return nil
+	end
+
+	local animationName = tostring(shot.AnimationName or "CameraAnimation")
+	local animation = model:FindFirstChild(animationName, true)
+	if not animation or not animation:IsA("Animation") or animation.AnimationId == "" then
+		warn("StoryHorror: Camera rig " .. modelName .. " is missing a valid Animation " .. animationName)
+		return nil
+	end
+
+	return {
+		model = model,
+		cameraPart = cameraPart,
+		animationId = animation.AnimationId,
+	}
+end
+
 local function fireCutscene(action)
 	local payload = {
 		freezeControls = action.FreezeControls ~= false,
@@ -1102,8 +1233,14 @@ local function fireCutscene(action)
 			warn("StoryHorror: Cutscene limited to 100 shots.")
 			break
 		end
-		local cameraCFrame = getPartCFramePayload(shot.CameraPartName)
-		if cameraCFrame then
+		local wantsRig = tostring(shot.CameraModelName or "") ~= ""
+		local rig = getCutsceneRigPayload(shot)
+		local cameraCFrame = nil
+		if not wantsRig then
+			-- Backwards compatibility for old cutscenes made from stationary Parts.
+			cameraCFrame = getPartCFramePayload(shot.CameraPartName)
+		end
+		if rig or cameraCFrame then
 			local soundPayload = getCutsceneSoundPayload(shot.SoundName)
 			if soundPayload then
 				soundPayload.volume = math.clamp(tonumber(shot.Volume) or soundPayload.volume, 0, 10)
@@ -1111,7 +1248,15 @@ local function fireCutscene(action)
 				if shot.Looped ~= nil then soundPayload.looped = shot.Looped == true end
 			end
 			table.insert(payload.shots, {
+				animatedRig = rig ~= nil,
 				cameraCFrame = cameraCFrame,
+				cameraModel = rig and rig.model or nil,
+				cameraPart = rig and rig.cameraPart or nil,
+				animationId = rig and rig.animationId or nil,
+				duration = math.clamp(tonumber(shot.Duration or shot.HoldDuration) or 0, 0, 120),
+				looped = shot.Looped == true,
+				animationSpeed = math.clamp(tonumber(shot.AnimationSpeed) or 1, 0.05, 4),
+				animationFadeTime = math.clamp(tonumber(shot.AnimationFadeTime) or 0.1, 0, 10),
 				moveDuration = math.clamp(tonumber(shot.MoveDuration) or 0, 0, 120),
 				holdDuration = math.clamp(tonumber(shot.HoldDuration) or 0, 0, 120),
 				easingStyle = tostring(shot.EasingStyle or "Sine"),
