@@ -49,6 +49,7 @@ local cutsceneActive = false
 local cutsceneSavedCamera = nil
 local cutsceneSounds = {}
 local cutsceneEffectGui = nil
+local cutsceneAnimationTrack = nil
 local controlsWereDisabled = false
 local CUTSCENE_CONTROL_ACTION = "StoryCutsceneBlockControls"
 
@@ -732,6 +733,10 @@ end
 
 local function stopCutscene()
 	cutsceneToken += 1
+	if cutsceneAnimationTrack then
+		cutsceneAnimationTrack:Stop(0.1)
+		cutsceneAnimationTrack = nil
+	end
 	if not cutsceneActive then
 		return
 	end
@@ -760,6 +765,51 @@ local function stopCutscene()
 	else
 		ContextActionService:UnbindAction(CUTSCENE_CONTROL_ACTION)
 	end
+end
+
+local function playCameraRigShot(shot, camera, token)
+	local model = shot.cameraModel
+	local cameraPart = shot.cameraPart
+	if typeof(model) ~= "Instance" or not model:IsA("Model") or not model:IsDescendantOf(Workspace) then return false end
+	if typeof(cameraPart) ~= "Instance" or not cameraPart:IsA("BasePart") or not cameraPart:IsDescendantOf(model) then return false end
+
+	local controller = model:FindFirstChildOfClass("AnimationController")
+	local animator = controller and controller:FindFirstChildOfClass("Animator")
+	if not animator then
+		warn("StoryHorror: Camera rig " .. model.Name .. " needs an AnimationController with an Animator.")
+		return false
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = tostring(shot.animationId or "")
+	local ok, track = pcall(function() return animator:LoadAnimation(animation) end)
+	animation:Destroy()
+	if not ok or not track then
+		warn("StoryHorror: Could not load the camera animation for " .. model.Name)
+		return false
+	end
+
+	cutsceneAnimationTrack = track
+	track.Looped = shot.looped == true
+	track:Play(math.max(0, tonumber(shot.animationFadeTime) or 0.1), 1, math.max(0.05, tonumber(shot.animationSpeed) or 1))
+	if shot.fieldOfView then camera.FieldOfView = math.clamp(tonumber(shot.fieldOfView) or 70, 1, 120) end
+
+	-- Duration is explicit so every client ends at the same time even if an asset is
+	-- still loading. When omitted, use the loaded animation length (maximum 120s).
+	local duration = math.max(0, tonumber(shot.duration) or 0)
+	if duration == 0 then
+		local loadDeadline = os.clock() + 3
+		while token == cutsceneToken and track.Length <= 0 and os.clock() < loadDeadline do RunService.RenderStepped:Wait() end
+		duration = math.clamp(track.Length > 0 and track.Length or 10, 0, 120)
+	end
+	local finishAt = os.clock() + duration
+	while token == cutsceneToken and os.clock() < finishAt and cameraPart:IsDescendantOf(Workspace) do
+		camera.CFrame = cameraPart.CFrame
+		RunService.RenderStepped:Wait()
+	end
+	track:Stop(math.max(0, tonumber(shot.animationFadeTime) or 0.1))
+	if cutsceneAnimationTrack == track then cutsceneAnimationTrack = nil end
+	return token == cutsceneToken
 end
 
 local function playCutsceneSound(soundData)
@@ -892,6 +942,15 @@ local function playCutscene(payload)
 	task.spawn(function()
 		for _, shot in ipairs(payload.shots or {}) do
 			if token ~= cutsceneToken then return end
+			if shot.animatedRig then
+				playCutsceneSound(shot.sound)
+				if not playCameraRigShot(shot, camera, token) then
+					if token ~= cutsceneToken then return end
+					warn("StoryHorror: Invalid animated camera rig; skipping shot.")
+					if not waitForCutscene(token, math.max(0, tonumber(shot.duration) or 0)) then return end
+				end
+				continue
+			end
 			local target = cframeFromPayload(shot.cameraCFrame)
 			if target then
 				local duration = math.max(0, tonumber(shot.moveDuration) or 0)
@@ -915,6 +974,7 @@ local function playCutscene(payload)
 			local holdUntil = os.clock() + math.max(0, tonumber(shot.holdDuration) or 0)
 			while token == cutsceneToken and os.clock() < holdUntil do RunService.RenderStepped:Wait() end
 		end
+
 
 		-- A timed effect may intentionally outlast the final camera shot. Keep the
 		-- cutscene alive until that effect finishes instead of deleting its GUI early.
