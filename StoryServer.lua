@@ -27,6 +27,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 local SoundService = game:GetService("SoundService")
 local Lighting = game:GetService("Lighting")
@@ -36,6 +37,17 @@ local CONFIG = {
 	PointsRequired = 30,
 	PointsPerCollectible = 10,
 	CountdownSeconds = 5,
+	
+	-- DEVELOPMENT ONLY. The server evaluates these switches, so a client cannot
+	-- grant itself testing access. Keep Enabled false in the published game.
+	Testing = {
+		Enabled = true,
+		StudioOnly = true,
+		AllowedUserIds = {}, -- Required if StudioOnly is false, e.g. { 12345678 }.
+		BypassPoints = true,
+		--StartTask = 1, -- A 1-based number or exact task Id, such as "DrawSigil".
+		AllowChatCommands = true, -- /storytask <number-or-id> and /storyskip
+	},
 	
 	-- Security/gameplay: tools in these containers are permanently destroyed for
 	-- registered players when the story begins. StarterGear is included so the
@@ -179,7 +191,7 @@ local CONFIG = {
 			StartActions = {
 				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 3, FadeOutSeconds = 1, Text = "Dupa ceva timp...." },
 				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
-				{ Type = "SetUIVisible", Visible = true, Delay = "3", Elements = { "Task", "Notifications" } },
+				{ Type = "SetUIVisible", Visible = true, Delay = 3, Elements = { "Task", "Notifications" } },
 				{
 					Type = "PlayAnimation",
 					ModelName = "masinblej2",
@@ -229,7 +241,7 @@ local CONFIG = {
 				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 3, FadeOutSeconds = 1, Text = "Dupa ceva timp...." },
 				{ Type = "LoadMap", MapName = "TacauCityResidence", LoadedName = "Tacaul", Delay = 1 },
 				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
-				{ Type = "SetUIVisible", Visible = true, Delay = "3", Elements = { "Task", "Notifications" } },
+				{ Type = "SetUIVisible", Visible = true, Delay = 3, Elements = { "Task", "Notifications" } },
 			},
 		},
 		{
@@ -290,7 +302,7 @@ local CONFIG = {
 						{ Text = "acum hai la pod!", Duration = 2.5 },
 					},
 				},
-				{ Type = "SetUIVisible", Visible = false, Delay = "4", Elements = { "Task", "Notifications" } },
+				{ Type = "SetUIVisible", Visible = false, Delay = 4, Elements = { "Task", "Notifications" } },
 			},
 			EndActions = {
 				{ Type = "UnLoadMap", MapName = "DoamnaN", LoadedName = "DoamnaNLoaded", Delay = 1 },
@@ -311,7 +323,7 @@ local CONFIG = {
 				-- Unload map (works with "UnloadMap" or "UnLoadMap", etc.)
 				{ Type = "UnLoadMap", MapName = "DoamnaN", LoadedName = "DoamnaNLoaded", Delay = 1 },
 				{ Type = "UnLoadMap", MapName = "DoamnaNMergatoare", LoadedName = "Doamnanmergatoare", Delay = 1 },
-				{ Type = "SetLighting", Delay = "4.5", SkyboxName = "Black" },
+				{ Type = "SetLighting", Delay = 4.5, SkyboxName = "Black" },
 				--{ Type = "LoadMap", MapName = "police", LoadedName = "policeLoaded", Delay = 1 },
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
@@ -335,51 +347,18 @@ local CONFIG = {
 			Type = "Wait",
 			Title = "...",
 			Description = "...",
-			Duration = 81.6,
-			StartActions = {
-				{ Type = "LoadMap", MapName = "Adormitii", LoadedName = "AdormitiiLoaded"},
+			Duration = 85.6,
+			StartActions = {	
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" }, Delay = 1 },
+				{ Type = "LoadMap", MapName = "Adormitii", LoadedName = "AdormitiiLoaded", Delay = 2},
 				{ Type = "UnLoadMap", MapName = "Adormitii", LoadedName = "AdormitiiLoaded", Delay = 55 },
-				{ Type = "LoadMap", MapName = "AnimatiiCabana", LoadedName = "AnimatiiCabanaLoaded"},
-				{ Type = "Teleport", PartName = "CabanaTeleportPartCutscene"},
-				{
-					Type = "PlayAnimation",
-					ModelName = "Door",
-					AnimationName = "DoorAnimation",
-					ModelRootName = "Tacaul", -- must match LoadMap.LoadedName
-					TrackName = "door", -- unique ID used to stop/replace this track
-					Looped = false,
-					Speed = 1,
-					Priority = "Action",
-					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
-				},
-				{
-					Type = "PlayAnimation",
-					ModelName = "drs3013",
-					AnimationName = "Jasonteanu",
-					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
-					TrackName = "jasonteanu", -- unique ID used to stop/replace this track
-					Looped = false,
-					Speed = 1,
-					Priority = "Action",
-					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
-				},
-				{
-					Type = "PlayAnimation",
-					ModelName = "DoamnaNAnimatieCabana",
-					AnimationName = "NazCabana",
-					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
-					TrackName = "nazcabana", -- unique ID used to stop/replace this track
-					Looped = false,
-					Speed = 1,
-					Priority = "Action",
-					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
-				},
-				
-				
-				
+				{ Type = "LoadMap", MapName = "AnimatiiCabana", LoadedName = "AnimatiiCabanaLoaded", Delay = 3},
+				{ Type = "Teleport", PartName = "CabanaTeleportPartCutscene", Delay = 4},
+				{ Type = "SetLighting", Delay = 63.25, SkyboxName = "Normal" },
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 				{
 					Type = "Cutscene",
+					Delay = 4,
 					FreezeControls = true,      -- default true
 					Shots = {
 						{
@@ -407,14 +386,6 @@ local CONFIG = {
 							Type = "BlackScreen",
 							Time = 13,
 							TransitionType = "Wink", -- top/bottom eyelids close and open
-							FadeInSeconds = 0.25,
-							HoldSeconds = 0.55,
-							FadeOutSeconds = 0.2,
-						},
-						{
-							Type = "BlackScreen",
-							Time = 17,
-							TransitionType = "Wink", -- top/bottom eyelids close and open
 							FadeInSeconds = 0.15,
 							HoldSeconds = 0.3,
 							FadeOutSeconds = 0.2,
@@ -429,15 +400,7 @@ local CONFIG = {
 						},
 						{
 							Type = "BlackScreen",
-							Time = 40,
-							TransitionType = "Wink", -- top/bottom eyelids close and open
-							FadeInSeconds = 0.2,
-							HoldSeconds = 0.3,
-							FadeOutSeconds = 0.2,
-						},
-						{
-							Type = "BlackScreen",
-							Time = 59,
+							Time = 58.64,
 							TransitionType = "Normal", -- normal blackscreen
 							FadeInSeconds = 0,
 							HoldSeconds = 0.45,
@@ -451,19 +414,52 @@ local CONFIG = {
 							HoldSeconds = 0.55,
 							FadeOutSeconds = 0.2,
 						},
-						{
-							Type = "BlackScreen",
-							Time = 71.4,
-							TransitionType = "Wink", -- top/bottom eyelids close and open
-							FadeInSeconds = 0.25,
-							HoldSeconds = 0.55,
-							FadeOutSeconds = 0.2,
-						},
 					},
 				},
+								{
+					Type = "PlayAnimation",
+					ModelName = "Door",
+					AnimationName = "DoorAnimation",
+					ModelRootName = "Tacaul", -- must match LoadMap.LoadedName
+					TrackName = "door", -- unique ID used to stop/replace this track
+					Looped = false,
+					Delay = 4,
+					Speed = 1,
+					Priority = "Action",
+					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				{
+					Type = "PlayAnimation",
+					ModelName = "drs3013",
+					AnimationName = "Jasonteanu",
+					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
+					TrackName = "jasonteanu", -- unique ID used to stop/replace this track
+					Looped = false,
+					Delay = 4,
+					Speed = 1,
+					Priority = "Action",
+					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				{
+					Type = "PlayAnimation",
+					ModelName = "DoamnaNAnimatieCabana",
+					AnimationName = "NazCabana",
+					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
+					TrackName = "nazcabana", -- unique ID used to stop/replace this track
+					Looped = false,
+					Delay = 4,
+					Speed = 1,
+					Priority = "Action",
+					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
+				},
+				
 			},
 			EndActions = {
-				{ Type = "CloseCutscene", }
+				{ Type = "CloseCutscene", },
+				{ Type = "Teleport", PartName = "CabanaTeleportPart"},
+				{ Type = "SetUIVisible", Visible = true, Elements = { "Task", "Notifications" } },
+				{ Type = "UnLoadMap", MapName = "AnimatiiCabana", LoadedName = "AnimatiiCabanaLoaded"},
+				{ Type = "UnLoadMap", MapName = "PeretiCabana", LoadedName = "PeretiLoaded"},
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
 		},
@@ -540,6 +536,7 @@ local loadedStoryMaps = {}
 local currentTaskConnection = nil
 local currentTaskToken = 0
 local currentTaskConnections = {}
+local debugActionGeneration = 0
 local currentDeliveryState = nil
 local activeStoryAnimationTracks = {}
 
@@ -919,6 +916,48 @@ end
 
 local function getTaskAt(index)
 	return CONFIG.Tasks and CONFIG.Tasks[index] or nil
+end
+
+local function resolveTaskIndex(taskReference)
+	local numericIndex = tonumber(taskReference)
+	if numericIndex and numericIndex % 1 == 0 and getTaskAt(numericIndex) then
+		return numericIndex
+	end
+
+	if type(taskReference) == "string" then
+		for index, taskConfig in ipairs(CONFIG.Tasks or {}) do
+			if taskConfig.Id == taskReference then
+				return index
+			end
+		end
+	end
+
+	return nil
+end
+
+local function isAuthorizedTester(player)
+	local testing = CONFIG.Testing
+	if not testing or testing.Enabled ~= true then
+		return false
+	end
+	if testing.StudioOnly ~= false then
+		return RunService:IsStudio()
+	end
+	for _, userId in ipairs(testing.AllowedUserIds or {}) do
+		if player.UserId == tonumber(userId) then
+			return true
+		end
+	end
+	return false
+end
+
+local function hasAuthorizedTesterInStory()
+	for player in pairs(activeStoryPlayers) do
+		if isAuthorizedTester(player) then
+			return true
+		end
+	end
+	return false
 end
 
 local function getTaskType(taskConfig)
@@ -1570,11 +1609,14 @@ local function runTaskActions(actions)
 		return
 	end
 
+	local generation = debugActionGeneration
 	for _, action in ipairs(actions) do
 		local delaySeconds = tonumber(action.Delay) or 0
 		if delaySeconds > 0 then
 			task.delay(delaySeconds, function()
-				runTaskAction(action)
+				if generation == debugActionGeneration then
+					runTaskAction(action)
+				end
 			end)
 		else
 			runTaskAction(action)
@@ -2066,7 +2108,13 @@ local function startStory()
 		points = 0,
 		required = CONFIG.PointsRequired,
 	})
-	startTaskByIndex(1)
+	local testingIsAuthorized = hasAuthorizedTesterInStory()
+	local configuredStartTask = testingIsAuthorized and CONFIG.Testing.StartTask or 1
+	local startIndex = resolveTaskIndex(configuredStartTask) or 1
+	if testingIsAuthorized and not resolveTaskIndex(configuredStartTask) then
+		warn("StoryHorror: Testing.StartTask is invalid; starting at task 1 instead.")
+	end
+	startTaskByIndex(startIndex)
 end
 
 local function startCountdownIfNeeded()
@@ -2099,7 +2147,7 @@ local function registerForCountdown(player)
 	end
 
 	local data = getData(player)
-	if data.points < CONFIG.PointsRequired then
+	if data.points < CONFIG.PointsRequired and not (isAuthorizedTester(player) and CONFIG.Testing.BypassPoints) then
 		fireUi(player, "Message", {
 			text = "You need " .. tostring(CONFIG.PointsRequired) .. " points first.",
 		})
@@ -2142,6 +2190,44 @@ end
 Players.PlayerAdded:Connect(function(player)
 	getData(player)
 	task.defer(sendFullState, player)
+
+	player.Chatted:Connect(function(message)
+		if not isAuthorizedTester(player) or CONFIG.Testing.AllowChatCommands ~= true then
+			return
+		end
+
+		local command, argument = string.match(message, "^/(%S+)%s*(.-)%s*$")
+		command = command and string.lower(command)
+		if command == "storyskip" then
+			if currentTask and activeStoryPlayers[player] then
+				completeCurrentTask("Task skipped by an authorized tester.")
+			else
+				fireUi(player, "Message", { text = "Start the story before skipping a task." })
+			end
+		elseif command == "storytask" then
+			local taskIndex = resolveTaskIndex(argument)
+			if not taskIndex then
+				fireUi(player, "Message", { text = "Unknown task. Use its exact Id or 1-based number." })
+				return
+			end
+			if not storyActive or not activeStoryPlayers[player] then
+				fireUi(player, "Message", { text = "Start the story before jumping to a task." })
+				return
+			end
+
+			-- Cancel delayed actions from the abandoned timeline and remove task-only state.
+			debugActionGeneration += 1
+			disconnectCurrentTaskConnection()
+			clearDeliveryState(true)
+			fireUiToStoryPlayers("Task2End", {})
+			fireUiToStoryPlayers("ConversationEnd", {})
+			fireUiToStoryPlayers("CutsceneEnd", {})
+			startTaskByIndex(taskIndex)
+			fireUiToStoryPlayers("Message", {
+				text = "Testing: jumped to task " .. tostring(taskIndex) .. ".",
+			})
+		end
+	end)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
