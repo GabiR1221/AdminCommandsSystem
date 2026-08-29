@@ -26,12 +26,14 @@
 ]]
 
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 local SoundService = game:GetService("SoundService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
 
 local CONFIG = {
 	PointsRequired = 30,
@@ -68,6 +70,24 @@ local CONFIG = {
 	SpawnDelayMax = 20,
 	CollectibleLifetimeSeconds = 120,
 	CollectibleClickDistance = 16,
+
+	-- Generic, server-authoritative resource harvesting. Tag tree Models/Parts with
+	-- "ChoppableTree" and axe Tools with "ChoppingTool" in Studio. Logs produced
+	-- here are independent of story tasks and can be consumed by any ResourceDelivery task.
+	Harvesting = {
+		TreeTag = "ChoppableTree",
+		ToolTag = "ChoppingTool",
+		ResourceTag = "StoryDeliverableResource",
+		DefaultHealth = 5,
+		DefaultDamage = 1,
+		DefaultRange = 12,
+		DefaultCooldown = 0.45,
+		DefaultRespawnSeconds = 20,
+		DefaultLogCount = 3,
+		DefaultLogTemplateName = "Log",
+		ResourceTemplatesFolderName = "ResourceTemplates",
+		FallSeconds = 1.1,
+	},
 
 	-- Optional fallback positions used if Workspace.StoryCollectibleSpawns does not exist or is empty.
 	FallbackSpawnPositions = {
@@ -122,8 +142,9 @@ local CONFIG = {
 	-- Optional teleport when the countdown finishes. Create a Part named StoryStartTeleport in Workspace.
 	StartTeleportPartName = "StoryStartTeleport",
 	TeleportPlayersOnStart = false,
-
-	-- Data-driven story tasks. Change Type to "Waypoint", "Drawing", "Wait", "Instant", or "Delivery".
+	
+	-- Data-driven story tasks. ResourceDelivery consumes independently-created tagged resources;
+	-- Delivery remains available for the old cloned-item/progressive-stage workflow.
 	-- StartActions run when a task begins. EndActions run after that task completes.
 	-- Supported actions: Fade, Teleport, LoadMap, UnloadMap, UnloadAllMaps, Conversation, Cutscene, CloseCutscene, PlayAnimation, StopAnimation, CloseDrawing, CloseConversation, Message, PlaySound, SetLighting.
 	Tasks = {
@@ -461,6 +482,21 @@ local CONFIG = {
 				{ Type = "UnLoadMap", MapName = "AnimatiiCabana", LoadedName = "AnimatiiCabanaLoaded"},
 				{ Type = "UnLoadMap", MapName = "PeretiCabana", LoadedName = "PeretiLoaded"},
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
+			},
+		},
+		{
+			Id = "DeliverLogs",
+			Type = "ResourceDelivery",
+			Title = "Bring logs",
+			Description = "Chop trees and carry the logs here.",
+			ResourceType = "Log", -- Must match the resource's ResourceType attribute.
+			DeliveryPartName = "LogDeliveryPart",
+			RequiredDeliveries = 3,
+			PickupMessage = "You picked up a log. Take it to the build area.",
+			CompleteMessage = "All logs delivered!",
+			StartActions = {
+				{ Type = "Teleport", PartName = "PadureTeleportPart", Delay = 1},
+				{ Type = "LoadMap", MapName = "PadureTacau", LoadedName = "PadureTacauLoaded"},
 			},
 		},
 	},
@@ -970,7 +1006,7 @@ local function getTaskRequired(taskConfig)
 		return storyPlayerCount()
 	elseif taskType == "Wait" then
 		return tonumber(taskConfig.Duration) or 0
-	elseif taskType == "Delivery" then
+	elseif taskType == "Delivery" or taskType == "ResourceDelivery" then
 		return tonumber(taskConfig.RequiredDeliveries or taskConfig.Required) or 1
 	end
 
@@ -1003,7 +1039,15 @@ local function clearDeliveryState(destroyStageModel)
 
 	for _, carried in pairs(currentDeliveryState.carriedByPlayer or {}) do
 		if carried.item and carried.item.Parent then
-			carried.item:Destroy()
+			if currentDeliveryState.externalItems then
+				for _, descendant in ipairs(carried.item:GetDescendants()) do
+					if descendant:IsA("WeldConstraint") then descendant:Destroy() end
+				end
+				carried.item.Parent = carried.originParent or Workspace
+				setInstanceCFrame(carried.item, carried.originCFrame)
+			else
+				carried.item:Destroy()
+			end
 		end
 	end
 
@@ -1867,11 +1911,16 @@ local function pickupDeliveryItem(player, item, taskConfig)
 	if not item or not item.Parent or currentDeliveryState.claimedItems[item] then
 		return
 	end
+	if currentDeliveryState.externalItems and taskConfig.ResourceType
+		and item:GetAttribute("ResourceType") ~= taskConfig.ResourceType then
+		return
+	end
 
 	currentDeliveryState.claimedItems[item] = true
 	local originCFrame = getInstanceCFrame(item)
+	local originParent = item.Parent
 	if attachItemToPlayer(player, item, taskConfig) then
-		currentDeliveryState.carriedByPlayer[player] = { item = item, originCFrame = originCFrame }
+		currentDeliveryState.carriedByPlayer[player] = { item = item, originCFrame = originCFrame, originParent = originParent }
 		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			trackCurrentTaskConnection(humanoid.Died:Connect(function()
@@ -1936,10 +1985,9 @@ returnCarriedItemToWorld = function(player, taskConfig)
 end
 
 local function prepareDeliveryTask(taskConfig)
-	local sourceFolder = getDeliverySourceFolder(taskConfig)
-	if not sourceFolder then
-		return
-	end
+	local isResourceDelivery = getTaskType(taskConfig) == "ResourceDelivery"
+	local sourceFolder = not isResourceDelivery and getDeliverySourceFolder(taskConfig) or nil
+	if not isResourceDelivery and not sourceFolder then return end
 
 	local deliveryPartName = taskConfig.DeliveryPartName or taskConfig.DropoffPartName
 	local deliveryPart = deliveryPartName and Workspace:FindFirstChild(deliveryPartName)
@@ -1964,14 +2012,28 @@ local function prepareDeliveryTask(taskConfig)
 		claimedItems = {},
 		delivered = 0,
 		stageModel = nil,
+		externalItems = isResourceDelivery,
 	}
 
-	for _, template in ipairs(sourceFolder:GetChildren()) do
-		if template:IsA("BasePart") or template:IsA("Model") then
-			local item = template:Clone()
-			item.Parent = deliveryRuntimeFolder
-			removePromptDescendants(item)
-			addDeliveryClickDetector(item, taskConfig)
+	if isResourceDelivery then
+		local function registerResource(item)
+			if (item:IsA("BasePart") or item:IsA("Model"))
+				and (not taskConfig.ResourceType or item:GetAttribute("ResourceType") == taskConfig.ResourceType) then
+				addDeliveryClickDetector(item, taskConfig)
+			end
+		end
+		for _, item in ipairs(CollectionService:GetTagged(CONFIG.Harvesting.ResourceTag)) do
+			registerResource(item)
+		end
+		trackCurrentTaskConnection(CollectionService:GetInstanceAddedSignal(CONFIG.Harvesting.ResourceTag):Connect(registerResource))
+	else
+		for _, template in ipairs(sourceFolder:GetChildren()) do
+			if template:IsA("BasePart") or template:IsA("Model") then
+				local item = template:Clone()
+				item.Parent = deliveryRuntimeFolder
+				removePromptDescendants(item)
+				addDeliveryClickDetector(item, taskConfig)
+			end
 		end
 	end
 
@@ -2014,7 +2076,7 @@ startTaskByIndex = function(taskIndex)
 		prepareWaypointTask(taskConfig)
 	elseif taskType == "Drawing" then
 		startDrawingTask(taskConfig)
-	elseif taskType == "Delivery" then
+	elseif taskType == "Delivery" or taskType == "ResourceDelivery" then
 		prepareDeliveryTask(taskConfig)
 	elseif taskType == "Wait" then
 		local duration = tonumber(taskConfig.Duration) or 0
@@ -2276,6 +2338,138 @@ remoteEvent.OnServerEvent:Connect(function(player, action)
 		completeCurrentTask()
 	end
 end)
+
+-- Tree harvesting deliberately does not know which story task is active. It only
+-- creates typed, tagged resources. This keeps acquisition reusable (mining, crates,
+-- fishing, etc. can create the same tag) and lets ResourceDelivery stay generic.
+local harvesting = CONFIG.Harvesting
+local treeStates = {}
+local connectedTools = setmetatable({}, { __mode = "k" })
+
+local function getResourceTemplate(name)
+	local storyStorage = ServerStorage:FindFirstChild(CONFIG.StoryStorageFolderName)
+	local templates = storyStorage and storyStorage:FindFirstChild(harvesting.ResourceTemplatesFolderName)
+	return templates and templates:FindFirstChild(name)
+end
+
+local function spawnTreeResources(tree, state)
+	local templateName = tree:GetAttribute("ResourceTemplateName") or harvesting.DefaultLogTemplateName
+	local template = getResourceTemplate(templateName)
+	if not template or not (template:IsA("Model") or template:IsA("BasePart")) then
+		warn("StoryHorror: Missing resource template " .. tostring(templateName) .. " in ServerStorage."
+			.. CONFIG.StoryStorageFolderName .. "." .. harvesting.ResourceTemplatesFolderName)
+		return
+	end
+	local count = math.max(1, math.floor(tonumber(tree:GetAttribute("ResourceCount")) or harvesting.DefaultLogCount))
+	local resourceType = tree:GetAttribute("ResourceType") or "Log"
+	for index = 1, count do
+		local resource = template:Clone()
+		resource:SetAttribute("ResourceType", resourceType)
+		resource:SetAttribute("SourceTree", tree.Name)
+		resource.Parent = Workspace
+		local angle = (index / count) * math.pi * 2
+		setInstanceCFrame(resource, state.pivot * CFrame.new(math.cos(angle) * 2.5, 1, math.sin(angle) * 2.5))
+		CollectionService:AddTag(resource, harvesting.ResourceTag)
+	end
+end
+
+local function fellAndRespawnTree(tree, state)
+	state.alive = false
+	spawnTreeResources(tree, state)
+	local value = Instance.new("CFrameValue")
+	value.Value = tree:GetPivot()
+	local changed = value:GetPropertyChangedSignal("Value"):Connect(function()
+		if tree.Parent then tree:PivotTo(value.Value) end
+	end)
+	local fallCFrame = state.pivot * CFrame.Angles(0, 0, math.rad(82))
+	local tween = TweenService:Create(value, TweenInfo.new(harvesting.FallSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Value = fallCFrame })
+	tween:Play()
+	tween.Completed:Wait()
+	changed:Disconnect()
+	value:Destroy()
+	for part, properties in pairs(state.parts) do
+		if part.Parent then
+			part.Transparency = 1
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+		end
+	end
+	task.delay(tonumber(tree:GetAttribute("RespawnSeconds")) or harvesting.DefaultRespawnSeconds, function()
+		if not tree.Parent then treeStates[tree] = nil return end
+		tree:PivotTo(state.pivot)
+		for part, properties in pairs(state.parts) do
+			if part.Parent then
+				part.Transparency = properties.transparency
+				part.CanCollide = properties.canCollide
+				part.CanTouch = properties.canTouch
+				part.CanQuery = properties.canQuery
+			end
+		end
+		state.health = tonumber(tree:GetAttribute("MaxHealth")) or harvesting.DefaultHealth
+		state.alive = true
+	end)
+end
+
+local function registerTree(tree)
+	if treeStates[tree] or not (tree:IsA("Model") or tree:IsA("BasePart")) then return end
+	local parts = {}
+	if tree:IsA("BasePart") then
+		parts[tree] = { transparency = tree.Transparency, canCollide = tree.CanCollide, canTouch = tree.CanTouch, canQuery = tree.CanQuery }
+	end
+	for _, descendant in ipairs(tree:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			parts[descendant] = { transparency = descendant.Transparency, canCollide = descendant.CanCollide, canTouch = descendant.CanTouch, canQuery = descendant.CanQuery }
+		end
+	end
+	treeStates[tree] = { alive = true, health = tonumber(tree:GetAttribute("MaxHealth")) or harvesting.DefaultHealth, pivot = tree:GetPivot(), parts = parts }
+end
+
+local function findTreeForPlayer(player, range)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 then return nil end
+	local best, bestDistance
+	for tree, state in pairs(treeStates) do
+		if state.alive and tree.Parent and tree:IsDescendantOf(Workspace) then
+			local distance = (tree:GetPivot().Position - root.Position).Magnitude
+			local direction = distance > 0 and (tree:GetPivot().Position - root.Position).Unit or root.CFrame.LookVector
+			if distance <= range and root.CFrame.LookVector:Dot(direction) >= 0.15 and (not bestDistance or distance < bestDistance) then
+				best, bestDistance = tree, distance
+			end
+		end
+	end
+	return best
+end
+
+local function connectChoppingTool(tool)
+	if connectedTools[tool] or not tool:IsA("Tool") then return end
+	connectedTools[tool] = true
+	local lastSwing = 0
+	tool.Activated:Connect(function()
+		local character = tool.Parent
+		local player = character and Players:GetPlayerFromCharacter(character)
+		if not player then return end -- Tool must actually be equipped; Backpack activation is rejected.
+		local cooldown = tonumber(tool:GetAttribute("ChopCooldown")) or harvesting.DefaultCooldown
+		if os.clock() - lastSwing < cooldown then return end
+		lastSwing = os.clock()
+		local tree = findTreeForPlayer(player, tonumber(tool:GetAttribute("ChopRange")) or harvesting.DefaultRange)
+		local state = tree and treeStates[tree]
+		if not state or not state.alive then return end
+		state.health -= math.max(0, tonumber(tool:GetAttribute("ChopDamage")) or harvesting.DefaultDamage)
+		if state.health <= 0 then
+			-- Lock synchronously so two near-simultaneous activations cannot award two drop batches.
+			state.alive = false
+			task.spawn(fellAndRespawnTree, tree, state)
+		end
+	end)
+end
+
+for _, tree in ipairs(CollectionService:GetTagged(harvesting.TreeTag)) do registerTree(tree) end
+CollectionService:GetInstanceAddedSignal(harvesting.TreeTag):Connect(registerTree)
+for _, tool in ipairs(CollectionService:GetTagged(harvesting.ToolTag)) do connectChoppingTool(tool) end
+CollectionService:GetInstanceAddedSignal(harvesting.ToolTag):Connect(connectChoppingTool)
 
 disableSpawnMarkerPrompts()
 disableUnusedStoryPrompts()
