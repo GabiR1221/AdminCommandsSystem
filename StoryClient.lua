@@ -52,6 +52,88 @@ local cutsceneEffectGui = nil
 local cutsceneAnimationTrack = nil
 local controlsWereDisabled = false
 local CUTSCENE_CONTROL_ACTION = "StoryCutsceneBlockControls"
+local activeHarvestSwings = setmetatable({}, { __mode = "k" })
+local activeTreeShakes = setmetatable({}, { __mode = "k" })
+
+local function tweenValue(value, duration, style, direction, goal)
+	local tween = TweenService:Create(value, TweenInfo.new(duration, style, direction), { Value = goal })
+	tween:Play()
+	tween.Completed:Wait()
+end
+
+-- Animate only the owner's replicated Tool. Damage and target selection have already
+-- been accepted by the server; this function is deliberately cosmetic.
+local function playHarvestSwing(tool)
+	if not tool or not tool:IsA("Tool") or tool.Parent ~= player.Character then return end
+	local previous = activeHarvestSwings[tool]
+	if previous then previous.cancelled = true end
+	local state = { cancelled = false }
+	activeHarvestSwings[tool] = state
+
+	local offset = Instance.new("CFrameValue")
+	local originalGrip = tool.Grip
+	local handle = tool:FindFirstChild("Handle")
+	local handleAttachment = handle and handle:FindFirstChild("HandleAttachment")
+	local handAttachment
+	if player.Character then
+		for _, descendant in ipairs(player.Character:GetDescendants()) do
+			if descendant:IsA("Bone") then
+				local candidate = descendant:FindFirstChild(tool:GetAttribute("HandAttachmentName") or "ToolGrip")
+				if candidate and candidate:IsA("Attachment") then handAttachment = candidate break end
+			end
+		end
+	end
+
+	local renderConnection = RunService.RenderStepped:Connect(function()
+		if state.cancelled or tool.Parent ~= player.Character then return end
+		if handle and handle:IsA("BasePart") and handleAttachment and handAttachment then
+			handle.CFrame = handAttachment.WorldCFrame * offset.Value * handleAttachment.CFrame:Inverse()
+		else
+			tool.Grip = originalGrip * offset.Value
+		end
+	end)
+
+	task.spawn(function()
+		tweenValue(offset, 0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, CFrame.Angles(math.rad(28), 0, math.rad(10)))
+		if not state.cancelled then
+			tweenValue(offset, 0.11, Enum.EasingStyle.Quart, Enum.EasingDirection.In, CFrame.Angles(math.rad(-62), 0, math.rad(-7)))
+		end
+		if not state.cancelled then
+			tweenValue(offset, 0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out, CFrame.identity)
+		end
+		renderConnection:Disconnect()
+		-- A newer swing may already own the Grip. Only this invocation may restore it.
+		if activeHarvestSwings[tool] == state and tool.Parent and not (handleAttachment and handAttachment) then
+			tool.Grip = originalGrip
+		end
+		offset:Destroy()
+		if activeHarvestSwings[tool] == state then activeHarvestSwings[tool] = nil end
+	end)
+end
+
+local function playTreeShake(tree, basePivot, angleDegrees)
+	if not tree or not (tree:IsA("Model") or tree:IsA("BasePart")) or not tree:IsDescendantOf(Workspace) then return end
+	if typeof(basePivot) ~= "CFrame" then basePivot = tree:GetPivot() end
+	local previous = activeTreeShakes[tree]
+	if previous then previous.cancelled = true end
+	local state = { cancelled = false }
+	activeTreeShakes[tree] = state
+	local value = Instance.new("CFrameValue")
+	value.Value = basePivot
+	local changed = value:GetPropertyChangedSignal("Value"):Connect(function()
+		if not state.cancelled and tree.Parent then tree:PivotTo(value.Value) end
+	end)
+	local angle = math.rad(math.clamp(tonumber(angleDegrees) or 2.5, 0, 8))
+
+	task.spawn(function()
+		tweenValue(value, 0.055, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, basePivot * CFrame.Angles(0, 0, angle))
+		if not state.cancelled then tweenValue(value, 0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, basePivot * CFrame.Angles(0, 0, -angle * 0.65)) end
+		if not state.cancelled then tweenValue(value, 0.11, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, basePivot) end
+		changed:Disconnect()
+		value:Destroy()
+		if activeTreeShakes[tree] == state then activeTreeShakes[tree] = nil end
+	end)
+end
 
 local function createLabel(parent, name, size, position, textSize)
 	local label = Instance.new("TextLabel")
@@ -1092,6 +1174,10 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		showNotification(payload.text or "")
 	elseif action == "UIVisibility" then
 		applyUiVisibility(payload)
+	elseif action == "HarvestSwing" then
+		playHarvestSwing(payload.tool)
+	elseif action == "HarvestImpact" then
+		playTreeShake(payload.tree, payload.pivot, payload.angleDegrees)
 	end
 end)
 
