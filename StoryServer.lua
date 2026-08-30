@@ -76,6 +76,7 @@ local CONFIG = {
 	-- here are independent of story tasks and can be consumed by any ResourceDelivery task.
 	Harvesting = {
 		TreeTag = "ChoppableTree",
+		TreeFolderName = "ChoppableTrees",
 		ToolTag = "ChoppingTool",
 		ResourceTag = "StoryDeliverableResource",
 		DefaultHealth = 5,
@@ -85,6 +86,7 @@ local CONFIG = {
 		DefaultRespawnSeconds = 20,
 		DefaultLogCount = 3,
 		DefaultLogTemplateName = "Log",
+		--DefaultResourceLifetimeSeconds = 30,
 		ResourceTemplatesFolderName = "ResourceTemplates",
 		FallSeconds = 1.1,
 	},
@@ -575,6 +577,7 @@ local currentTaskConnections = {}
 local debugActionGeneration = 0
 local currentDeliveryState = nil
 local activeStoryAnimationTracks = {}
+local refreshHarvestingRoot
 
 local runtimeFolder = Workspace:FindFirstChild(CONFIG.RuntimeFolderName)
 if not runtimeFolder then
@@ -1039,15 +1042,17 @@ local function clearDeliveryState(destroyStageModel)
 
 	for _, carried in pairs(currentDeliveryState.carriedByPlayer or {}) do
 		if carried.item and carried.item.Parent then
-			if currentDeliveryState.externalItems then
-				for _, descendant in ipairs(carried.item:GetDescendants()) do
-					if descendant:IsA("WeldConstraint") then descendant:Destroy() end
-				end
-				carried.item.Parent = carried.originParent or Workspace
-				setInstanceCFrame(carried.item, carried.originCFrame)
-			else
-				carried.item:Destroy()
-			end
+			-- Destroy also removes the character weld when an item is being carried.
+			carried.item:Destroy()
+		end
+	end
+
+	if currentDeliveryState.externalItems then
+		-- Includes resources that are still on the ground as well as any destroyed
+		-- deliveries retained as table keys. Only resources accepted by this task's
+		-- ResourceType filter are tracked here.
+		for resource in pairs(currentDeliveryState.trackedResources or {}) do
+			if resource.Parent then resource:Destroy() end
 		end
 	end
 
@@ -1214,6 +1219,13 @@ local function loadStoryMap(mapName, loadedName)
 		loadedInstance = mapFolder:Clone()
 		loadedInstance.Name = key
 		loadedInstance.Parent = Workspace
+	end
+
+	-- CollectionService tags are cloned with a map, but InstanceAdded is not a
+	-- reliable discovery boundary for an already-tagged hierarchy being reparented.
+	-- Scan only this newly loaded root (rather than all of Workspace) once.
+	if refreshHarvestingRoot then
+		refreshHarvestingRoot(loadedInstance)
 	end
 
 	loadedStoryMaps[key] = {
@@ -2013,12 +2025,15 @@ local function prepareDeliveryTask(taskConfig)
 		delivered = 0,
 		stageModel = nil,
 		externalItems = isResourceDelivery,
+		trackedResources = {},
 	}
 
 	if isResourceDelivery then
 		local function registerResource(item)
 			if (item:IsA("BasePart") or item:IsA("Model"))
+				and item:IsDescendantOf(Workspace)
 				and (not taskConfig.ResourceType or item:GetAttribute("ResourceType") == taskConfig.ResourceType) then
+				currentDeliveryState.trackedResources[item] = true
 				addDeliveryClickDetector(item, taskConfig)
 			end
 		end
@@ -2412,7 +2427,12 @@ local function fellAndRespawnTree(tree, state)
 end
 
 local function registerTree(tree)
-	if treeStates[tree] or not (tree:IsA("Model") or tree:IsA("BasePart")) then return end
+	if treeStates[tree]
+		or not (tree:IsA("Model") or tree:IsA("BasePart"))
+		or not tree:IsDescendantOf(Workspace)
+	then
+		return
+	end
 	local parts = {}
 	if tree:IsA("BasePart") then
 		parts[tree] = { transparency = tree.Transparency, canCollide = tree.CanCollide, canTouch = tree.CanTouch, canQuery = tree.CanQuery }
@@ -2423,6 +2443,60 @@ local function registerTree(tree)
 		end
 	end
 	treeStates[tree] = { alive = true, health = tonumber(tree:GetAttribute("MaxHealth")) or harvesting.DefaultHealth, pivot = tree:GetPivot(), parts = parts }
+	tree.Destroying:Once(function()
+		treeStates[tree] = nil
+	end)
+end
+
+refreshHarvestingRoot = function(root)
+	if not root or not root:IsDescendantOf(Workspace) then return end
+	local function registerTreeFolder(folder)
+		for _, child in ipairs(folder:GetChildren()) do
+			if child:IsA("Model") or child:IsA("BasePart") then
+				registerTree(child)
+			end
+		end
+	end
+	if CollectionService:HasTag(root, harvesting.TreeTag) then
+		registerTree(root)
+	end
+	if root:IsA("Folder") and root.Name == harvesting.TreeFolderName then
+		registerTreeFolder(root)
+	end
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if CollectionService:HasTag(descendant, harvesting.TreeTag) then
+			registerTree(descendant)
+		elseif descendant:IsA("Folder") and descendant.Name == harvesting.TreeFolderName then
+			registerTreeFolder(descendant)
+		end
+	end
+end
+
+local function closestPointOnPart(part, worldPosition)
+	local localPosition = part.CFrame:PointToObjectSpace(worldPosition)
+	local halfSize = part.Size * 0.5
+	local clamped = Vector3.new(
+		math.clamp(localPosition.X, -halfSize.X, halfSize.X),
+		math.clamp(localPosition.Y, -halfSize.Y, halfSize.Y),
+		math.clamp(localPosition.Z, -halfSize.Z, halfSize.Z)
+	)
+	return part.CFrame:PointToWorldSpace(clamped)
+end
+
+local function getTreeTarget(tree, state, origin)
+	local nearestPoint, nearestDistance
+	for part in pairs(state.parts) do
+		if part.Parent and part.Transparency < 1 then
+			local point = closestPointOnPart(part, origin)
+			local distance = (point - origin).Magnitude
+			if not nearestDistance or distance < nearestDistance then
+				nearestPoint, nearestDistance = point, distance
+			end
+		end
+	end
+	if nearestPoint then return nearestPoint, nearestDistance end
+	local pivotPosition = tree:GetPivot().Position
+	return pivotPosition, (pivotPosition - origin).Magnitude
 end
 
 local function findTreeForPlayer(player, range)
@@ -2430,17 +2504,19 @@ local function findTreeForPlayer(player, range)
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not root or not humanoid or humanoid.Health <= 0 then return nil end
-	local best, bestDistance
+	local best, bestDistance, bestTargetPosition
 	for tree, state in pairs(treeStates) do
 		if state.alive and tree.Parent and tree:IsDescendantOf(Workspace) then
-			local distance = (tree:GetPivot().Position - root.Position).Magnitude
-			local direction = distance > 0 and (tree:GetPivot().Position - root.Position).Unit or root.CFrame.LookVector
+			-- Model pivots are often in the canopy or far from an imported trunk. Range
+			-- and facing must use the nearest visible/queryable tree part instead.
+			local targetPosition, distance = getTreeTarget(tree, state, root.Position)
+			local direction = distance > 0 and (targetPosition - root.Position).Unit or root.CFrame.LookVector
 			if distance <= range and root.CFrame.LookVector:Dot(direction) >= 0.15 and (not bestDistance or distance < bestDistance) then
-				best, bestDistance = tree, distance
+				best, bestDistance, bestTargetPosition = tree, distance, targetPosition
 			end
 		end
 	end
-	return best
+	return best, bestTargetPosition
 end
 
 local function connectChoppingTool(tool)
@@ -2454,11 +2530,34 @@ local function connectChoppingTool(tool)
 		local cooldown = tonumber(tool:GetAttribute("ChopCooldown")) or harvesting.DefaultCooldown
 		if os.clock() - lastSwing < cooldown then return end
 		lastSwing = os.clock()
-		local tree = findTreeForPlayer(player, tonumber(tool:GetAttribute("ChopRange")) or harvesting.DefaultRange)
+		local tree, hitPosition = findTreeForPlayer(player, tonumber(tool:GetAttribute("ChopRange")) or harvesting.DefaultRange)
 		local state = tree and treeStates[tree]
-		if not state or not state.alive then return end
+		-- The server, rather than a client RemoteEvent, starts the cosmetic swing. An
+		-- exploiter can therefore play extra visuals only for themselves, never damage.
+		if not state or not state.alive then
+			remoteEvent:FireClient(player, "HarvestSwing", { tool = tool })
+			return
+		end
 		state.health -= math.max(0, tonumber(tool:GetAttribute("ChopDamage")) or harvesting.DefaultDamage)
-		if state.health <= 0 then
+		local felled = state.health <= 0
+		remoteEvent:FireClient(player, "HarvestSwing", { tool = tool })
+		if not felled then
+			-- Only nearby players need the impact effect. This bounds RemoteEvent traffic
+			-- in larger servers while all authoritative tree state remains unchanged.
+			local shakeRange = math.max(32, (tonumber(tool:GetAttribute("ChopRange")) or harvesting.DefaultRange) * 3)
+			local treePosition = hitPosition or tree:GetPivot().Position
+			for _, observer in ipairs(Players:GetPlayers()) do
+				local observerRoot = observer.Character and observer.Character:FindFirstChild("HumanoidRootPart")
+				if observerRoot and (observerRoot.Position - treePosition).Magnitude <= shakeRange then
+					remoteEvent:FireClient(observer, "HarvestImpact", {
+						tree = tree,
+						pivot = state.pivot,
+						angleDegrees = tonumber(tree:GetAttribute("ShakeAngleDegrees")) or harvesting.ShakeAngleDegrees,
+					})
+				end
+			end
+		end
+		if felled then
 			-- Lock synchronously so two near-simultaneous activations cannot award two drop batches.
 			state.alive = false
 			task.spawn(fellAndRespawnTree, tree, state)
@@ -2466,10 +2565,51 @@ local function connectChoppingTool(tool)
 	end)
 end
 
-for _, tree in ipairs(CollectionService:GetTagged(harvesting.TreeTag)) do registerTree(tree) end
-CollectionService:GetInstanceAddedSignal(harvesting.TreeTag):Connect(registerTree)
+refreshHarvestingRoot(Workspace)
+CollectionService:GetInstanceAddedSignal(harvesting.TreeTag):Connect(function(tree)
+	-- Tags applied to templates in ServerStorage are intentionally ignored. Their
+	-- loaded clone is registered by loadStoryMap after it enters Workspace.
+	registerTree(tree)
+end)
+Workspace.DescendantAdded:Connect(function(descendant)
+	-- Covers already-tagged trees inserted by systems other than LoadMap. This is
+	-- an O(1) tag check; it does not rescan Workspace for every inserted part.
+	if CollectionService:HasTag(descendant, harvesting.TreeTag) then
+		registerTree(descendant)
+	elseif descendant:IsA("Folder") and descendant.Name == harvesting.TreeFolderName then
+		refreshHarvestingRoot(descendant)
+	end
+end)
+
+local function registerTaggedToolsUnder(root)
+	if root:IsA("Tool") and CollectionService:HasTag(root, harvesting.ToolTag) then connectChoppingTool(root) end
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("Tool") and CollectionService:HasTag(descendant, harvesting.ToolTag) then
+			connectChoppingTool(descendant)
+		end
+	end
+end
+
+local function watchPlayerTools(player)
+	local backpack = player:WaitForChild("Backpack")
+	registerTaggedToolsUnder(backpack)
+	backpack.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("Tool") and CollectionService:HasTag(descendant, harvesting.ToolTag) then connectChoppingTool(descendant) end
+	end)
+	local function watchCharacter(character)
+		registerTaggedToolsUnder(character)
+		character.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("Tool") and CollectionService:HasTag(descendant, harvesting.ToolTag) then connectChoppingTool(descendant) end
+		end)
+	end
+	if player.Character then watchCharacter(player.Character) end
+	player.CharacterAdded:Connect(watchCharacter)
+end
+
 for _, tool in ipairs(CollectionService:GetTagged(harvesting.ToolTag)) do connectChoppingTool(tool) end
 CollectionService:GetInstanceAddedSignal(harvesting.ToolTag):Connect(connectChoppingTool)
+for _, player in ipairs(Players:GetPlayers()) do task.spawn(watchPlayerTools, player) end
+Players.PlayerAdded:Connect(function(player) task.spawn(watchPlayerTools, player) end)
 
 disableSpawnMarkerPrompts()
 disableUnusedStoryPrompts()
