@@ -202,6 +202,7 @@ local CONFIG = {
 				{ Type = "Fade", FadeInSeconds = 1, HoldSeconds = 2, FadeOutSeconds = 1, Text = "Ziua Urmatoare..."},
 				{ Type = "Teleport", PartName = "Task2CompleteTeleport", Delay = 2 },
 				{ Type = "LoadMap", MapName = "strada", LoadedName = "LoadedStoryMap", Delay = 1 },
+				{ Type = "LoadMap", MapName = "DrSBoss", LoadedName = "DRS", Delay = 1 },
 			},
 		},
 		{
