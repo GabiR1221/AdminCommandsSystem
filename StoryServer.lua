@@ -39,7 +39,7 @@ local CONFIG = {
 	PointsRequired = 30,
 	PointsPerCollectible = 10,
 	CountdownSeconds = 5,
-	
+
 	-- DEVELOPMENT ONLY. The server evaluates these switches, so a client cannot
 	-- grant itself testing access. Keep Enabled false in the published game.
 	Testing = {
@@ -50,7 +50,7 @@ local CONFIG = {
 		--StartTask = 1, -- A 1-based number or exact task Id, such as "DrawSigil".
 		AllowChatCommands = true, -- /storytask <number-or-id> and /storyskip
 	},
-	
+
 	-- Security/gameplay: tools in these containers are permanently destroyed for
 	-- registered players when the story begins. StarterGear is included so the
 	-- removed tools do not return after a respawn.
@@ -144,7 +144,7 @@ local CONFIG = {
 	-- Optional teleport when the countdown finishes. Create a Part named StoryStartTeleport in Workspace.
 	StartTeleportPartName = "StoryStartTeleport",
 	TeleportPlayersOnStart = false,
-	
+
 	-- Data-driven story tasks. ResourceDelivery consumes independently-created tagged resources;
 	-- Delivery remains available for the old cloned-item/progressive-stage workflow.
 	-- StartActions run when a task begins. EndActions run after that task completes.
@@ -364,7 +364,7 @@ local CONFIG = {
 				{ Type = "LoadMap", MapName = "PeretiCabana", LoadedName = "PeretiLoaded", Delay = 1 },
 
 			},
-			
+
 		},
 		{
 			Id = "AfterDarkness3",
@@ -383,7 +383,16 @@ local CONFIG = {
 				{
 					Type = "Cutscene",
 					Delay = 4,
+					Audience = "AllPlayers", -- Each connected client plays its own camera and actor tracks.
+					Diagnostics = true, -- Log the published place version and asset failures in F9.
 					FreezeControls = true,      -- default true
+					-- Actors and camera are sampled on one client timeline. Do not also
+					-- start these rigs with separate server PlayAnimation actions.
+					Actors = {
+						{ ModelName = "Door", ModelRootName = "Tacaul", AnimationName = "DoorAnimation", Speed = 1, Priority = "Action" },
+						{ ModelName = "drs3013", ModelRootName = "AnimatiiCabanaLoaded", AnimationName = "Jasonteanu", Speed = 1, Priority = "Action" },
+						{ ModelName = "DoamnaNAnimatieCabana", ModelRootName = "AnimatiiCabanaLoaded", AnimationName = "NazCabana", Speed = 1, Priority = "Action" },
+					},
 					Shots = {
 						{
 							-- CameraRig is a Model in Workspace with an AnimationController,
@@ -440,43 +449,6 @@ local CONFIG = {
 						},
 					},
 				},
-								{
-					Type = "PlayAnimation",
-					ModelName = "Door",
-					AnimationName = "DoorAnimation",
-					ModelRootName = "Tacaul", -- must match LoadMap.LoadedName
-					TrackName = "door", -- unique ID used to stop/replace this track
-					Looped = false,
-					Delay = 4,
-					Speed = 1,
-					Priority = "Action",
-					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
-				},
-				{
-					Type = "PlayAnimation",
-					ModelName = "drs3013",
-					AnimationName = "Jasonteanu",
-					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
-					TrackName = "jasonteanu", -- unique ID used to stop/replace this track
-					Looped = false,
-					Delay = 4,
-					Speed = 1,
-					Priority = "Action",
-					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
-				},
-				{
-					Type = "PlayAnimation",
-					ModelName = "DoamnaNAnimatieCabana",
-					AnimationName = "NazCabana",
-					ModelRootName = "AnimatiiCabanaLoaded", -- must match LoadMap.LoadedName
-					TrackName = "nazcabana", -- unique ID used to stop/replace this track
-					Looped = false,
-					Delay = 4,
-					Speed = 1,
-					Priority = "Action",
-					Duration = 81.5,        -- optional; automatically stops after 8 seconds or = Duration
-				},
-				
 			},
 			EndActions = {
 				{ Type = "CloseCutscene", },
@@ -484,6 +456,147 @@ local CONFIG = {
 				{ Type = "SetUIVisible", Visible = true, Elements = { "Task", "Notifications" } },
 				{ Type = "UnLoadMap", MapName = "AnimatiiCabana", LoadedName = "AnimatiiCabanaLoaded"},
 				{ Type = "UnLoadMap", MapName = "PeretiCabana", LoadedName = "PeretiLoaded"},
+				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
+			},
+		},
+		{
+			Id = "DupaNoaptea1",
+			Type = "Wait",
+			Title = "Dialog cu DoamnaN",
+			Description = "...",
+			Duration = 15,
+			StartActions = {
+				{ Type = "Teleport", PartName = "DupaNoapte1TeleportPart", Delay = 1.4 },
+				{ Type = "LoadMap", MapName = "DoamnaNDupaNoaptea1", LoadedName = "DoamnaNNoaptea1", Delay = 1 },
+				{ Type = "LoadMap", MapName = "Barci", LoadedName = "Barcile", Delay = 1 },
+				{ Type = "UnLoadMap", MapName = "RelicStages"},
+				{
+					Type = "Conversation",
+					Delay = 6,
+					CameraPartName = "DupaNoapte1CameraPart",
+					TypewriterSpeed = 0.035,
+					Pages = {
+						{ Text = "Ce faceti dragilor, sper ca ati dormit bine pentru ca de ce nu", Duration = 3 },
+						{ Text = "am facut niste barci din kour", Duration = 2 },
+					},
+				},
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" } },
+			},
+		},
+		{
+			Id = "PeParteaCealalta",
+			Type = "Waypoint",
+			Title = "dute la kour",
+			Description = "dute pe partea cealalta",
+			WaypointPartName = "ParteaCealaltaWaypointPart",
+			Required = 1,
+			CompleteMessage = "Ati ajuns pe partea cealalta",
+			StartActions = {
+				{ Type = "SetUIVisible", Visible = true, Elements = { "Task", "Notifications" } },
+			},
+			EndActions = {
+				{ Type = "UnLoadMap", MapName = "DoamnaNDupaNoaptea1", LoadedName = "DoamnaNNoaptea1", Delay = 1 },
+			},
+		},
+		{
+			Id = "DupaParteaCealalta",
+			Type = "Wait",
+			Title = "Dialog cu DoamnaN",
+			Description = "...",
+			Duration = 15,
+			StartActions = {
+				{ Type = "Teleport", PartName = "Task4TeleportPart", Delay = 1.4 },
+				{ Type = "LoadMap", MapName = "DoamnaN", LoadedName = "DoamnaNLoaded", Delay = 1 },
+				{ Type = "LoadMap", MapName = "Garbage", LoadedName = "Gunoi", Delay = 1 },
+				{
+					Type = "Conversation",
+					Delay = 3,
+					CameraPartName = "Task4CameraPart",
+					TypewriterSpeed = 0.035,
+					Pages = {
+						{ Text = "CURATATI GUNOI SCLAVILOR", Duration = 3 },
+					},
+				},
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" } },
+			},
+		},
+		{
+			Id = "CuratatiTacaul",
+			Type = "Wait",
+			Title = "Curatati tacaul",
+			Description = "alup",
+			Duration = 10, ------------------------------------------CODEX Pt FISHING IN LOCUITOR
+			StartActions = {
+				{ Type = "SetUIVisible", Visible = true, Delay = 3, Elements = { "Task", "Notifications" } },
+			},
+		},
+		{
+			Id = "DialogInainteDeInvitati",
+			Type = "Wait",
+			Title = "Dialog cu DoamnaN",
+			Description = "...",
+			Duration = 13,
+			StartActions = {
+				{
+					Type = "Conversation",
+					Delay = 1,
+					CameraPartName = "Task4CameraPart",
+					TypewriterSpeed = 0.035,
+					Pages = {
+						{ Text = "Bunnn....", Duration = 4 },
+						{ Text = "Mi se pare mie sau se aude ceva din departare? Cred ca au venit invitatii speciali", Duration = 4 },
+						{ Text = "Domnule Dutu, fi amabil si du-te si fa-le cu mana la invitatii speciali", Duration = 4 },
+					},
+				},
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" } },
+			},
+		},
+		{
+			Id = "CutsceneInvitatii",
+			Type = "Wait",
+			Title = "...",
+			Description = "...",
+			Duration = 77,
+			StartActions = {	
+				{ Type = "SetUIVisible", Visible = false, Elements = { "Task", "Notifications" },},
+				{ Type = "LoadMap", MapName = "Invitatii", LoadedName = "InvitatiiLoaded",},
+				{ Type = "Teleport", PartName = "OutOfSightTeleport",},
+				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
+				{
+					Type = "Cutscene",
+					Delay = 0.1,
+					Audience = "AllPlayers", -- Each connected client plays its own camera and actor tracks.
+					Diagnostics = true, -- Log the published place version and asset failures in F9.
+					FreezeControls = true,      -- default true
+					-- Actors and camera are sampled on one client timeline. Do not also
+					-- start these rigs with separate server PlayAnimation actions.
+					Actors = {
+						{ ModelName = "AstonMartin2", ModelRootName = "InvitatiiLoaded", AnimationName = "AstonMartinAnimation", Speed = 1, Priority = "Action" },
+						{ ModelName = "Dr B", ModelRootName = "InvitatiiLoaded", AnimationName = "DrBAnimation", Speed = 1, Priority = "Action" },
+						{ ModelName = "blej6000", ModelRootName = "InvitatiiLoaded", AnimationName = "BlejAnimation", Speed = 1, Priority = "Action" },
+						{ ModelName = "drs2000", ModelRootName = "InvitatiiLoaded", AnimationName = "Drs2000Animation", Speed = 1, Priority = "Action" },
+						{ ModelName = "jujutinta", ModelRootName = "InvitatiiLoaded", AnimationName = "JujutintaAnimation", Speed = 1, Priority = "Action" },
+					},
+					Shots = {
+						{
+							-- CameraRig is a Model in Workspace with an AnimationController,
+							-- Animator, CameraPart, and Animation. The client follows CameraPart
+							-- every rendered frame while the animation plays.
+							CameraModelName = "CameraPartInvitatii",
+							CameraPartName = "CutsceneCameraPart",
+							AnimationName = "InvitatiiAnimation",
+							Duration = 75,
+							FieldOfView = 70,
+							Looped = false,
+						},
+					},
+				},
+			},
+			EndActions = {
+				{ Type = "CloseCutscene", },
+				{ Type = "Teleport", PartName = "Task4CameraPart"},
+				{ Type = "SetUIVisible", Visible = true, Elements = { "Task", "Notifications" } },
+				{ Type = "UnLoadMap", MapName = "Invitatii", LoadedName = "InvitatiiLoaded"},
 				--{ Type = "PlaySound", SoundName = "RelicCompleteSound", PlayCount = 3, PlayInterval = 2 },
 			},
 		},
@@ -578,6 +691,12 @@ local currentTaskConnections = {}
 local debugActionGeneration = 0
 local currentDeliveryState = nil
 local activeStoryAnimationTracks = {}
+local activeCutsceneAudience = nil
+local activeCutscenePayload = nil
+local cutsceneStreamingModes = {}
+local activeCutsceneFocus = nil
+local cutsceneFocusPlayers = {}
+local storyClientReadyAt = {}
 local refreshHarvestingRoot
 
 local runtimeFolder = Workspace:FindFirstChild(CONFIG.RuntimeFolderName)
@@ -637,6 +756,47 @@ end
 local function fireUiToAllPlayers(action, payload)
 	for _, player in ipairs(Players:GetPlayers()) do
 		fireUi(player, action, payload)
+	end
+end
+
+local function closeCutscene()
+	if activeCutsceneAudience == "AllPlayers" then
+		fireUiToAllPlayers("CutsceneEnd", {})
+	else
+		fireUiToStoryPlayers("CutsceneEnd", {})
+	end
+	activeCutsceneAudience = nil
+	activeCutscenePayload = nil
+	activeCutsceneFocus = nil
+	for player, part in pairs(cutsceneFocusPlayers) do
+		if player.Parent == Players then pcall(function() player:RemoveReplicationFocus(part) end) end
+	end
+	table.clear(cutsceneFocusPlayers)
+	for model, originalMode in pairs(cutsceneStreamingModes) do
+		if model.Parent then pcall(function() model.ModelStreamingMode = originalMode end) end
+	end
+	table.clear(cutsceneStreamingModes)
+end
+
+local function keepCutsceneRigLoaded(model)
+	if not Workspace.StreamingEnabled or cutsceneStreamingModes[model] then return end
+	local originalMode = model.ModelStreamingMode
+	local ok, message = pcall(function() model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent end)
+	if ok then
+		cutsceneStreamingModes[model] = originalMode
+	else
+		warn("StoryHorror: Could not keep cutscene rig " .. model.Name .. " streamed in: " .. tostring(message))
+	end
+end
+
+local function setCutsceneFocusForPlayer(player)
+	if not Workspace.StreamingEnabled or not activeCutsceneFocus or cutsceneFocusPlayers[player] then return end
+	local part = activeCutsceneFocus
+	local ok, message = pcall(function() player:AddReplicationFocus(part) end)
+	if ok then
+		cutsceneFocusPlayers[player] = part
+	else
+		warn("StoryHorror: Could not stream the camera area for " .. player.Name .. ": " .. tostring(message))
 	end
 end
 
@@ -1276,6 +1436,48 @@ local function getCutsceneSoundPayload(soundName)
 	}
 end
 
+local function findAnimationModel(action)
+	local modelName = tostring(action.ModelName or "")
+	local rootName = tostring(action.ModelRootName or action.LoadedMapName or "")
+	local searchRoot = Workspace
+
+	if rootName ~= "" then
+		local loadedRecord = loadedStoryMaps[rootName]
+		searchRoot = loadedRecord and loadedRecord.instance or Workspace:FindFirstChild(rootName, true)
+		if not searchRoot then return nil end
+	end
+
+	if searchRoot:IsA("Model") and searchRoot.Name == modelName then
+		return searchRoot
+	end
+	local model = searchRoot:FindFirstChild(modelName, true)
+	return model and model:IsA("Model") and model or nil
+end
+
+local function getStoryAnimator(model)
+	local host = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
+	if not host then
+		host = Instance.new("AnimationController")
+		host.Name = "StoryAnimationController"
+		host.Parent = model
+	end
+	local animator = host:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = host
+	end
+	return animator
+end
+
+local function getCutsceneRigCounts(model)
+	local parts, joints = 0, 0
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then parts += 1 end
+		if descendant:IsA("Motor6D") or descendant:IsA("Bone") then joints += 1 end
+	end
+	return parts, joints
+end
+
 local function getCutsceneRigPayload(shot)
 	local modelName = tostring(shot.CameraModelName or "")
 	if modelName == "" then return nil end
@@ -1309,6 +1511,7 @@ local function getCutsceneRigPayload(shot)
 		warn("StoryHorror: Camera rig " .. modelName .. " is missing a valid Animation " .. animationName)
 		return nil
 	end
+	getStoryAnimator(model)
 
 	return {
 		model = model,
@@ -1320,9 +1523,44 @@ end
 local function fireCutscene(action)
 	local payload = {
 		freezeControls = action.FreezeControls ~= false,
+		clientTimeline = action.Actors ~= nil,
+		serverRevision = "cutscene-v3",
+		diagnostics = action.Diagnostics == true,
+		placeId = game.PlaceId,
+		placeVersion = game.PlaceVersion,
+		universeId = game.GameId,
 		shots = {},
 		events = {},
+		actors = {},
 	}
+	for index, actor in ipairs(action.Actors or {}) do
+		if index > 50 then
+			warn("StoryHorror: Cutscene limited to 50 actors.")
+			break
+		end
+		local model = findAnimationModel(actor)
+		local animation = model and model:FindFirstChild(tostring(actor.AnimationName or ""), true)
+		if not animation or not animation:IsA("Animation") or animation.AnimationId == "" then
+			warn("StoryHorror: Missing cutscene actor or animation: " .. tostring(actor.ModelName) .. "/" .. tostring(actor.AnimationName)
+				.. "; skipping this actor and continuing the camera cutscene.")
+			continue
+		end
+		-- Create Animators on the server; the client plays these cosmetic tracks locally.
+		getStoryAnimator(model)
+		local parts, joints = getCutsceneRigCounts(model)
+		table.insert(payload.actors, {
+			model = model,
+			modelName = model.Name,
+			modelRootName = actor.ModelRootName or actor.LoadedMapName,
+			animationId = animation.AnimationId,
+			animationName = tostring(actor.AnimationName),
+			rigPartCount = parts,
+			rigJointCount = joints,
+			speed = math.clamp(tonumber(actor.Speed) or 1, 0.05, 10),
+			looped = actor.Looped == true,
+			priority = tostring(actor.Priority or "Action"),
+		})
+	end
 
 	for index, shot in ipairs(action.Shots or {}) do
 		if index > 100 then
@@ -1337,6 +1575,8 @@ local function fireCutscene(action)
 			cameraCFrame = getPartCFramePayload(shot.CameraPartName)
 		end
 		if rig or cameraCFrame then
+			local parts, joints = 0, 0
+			if rig then parts, joints = getCutsceneRigCounts(rig.model) end
 			local soundPayload = getCutsceneSoundPayload(shot.SoundName)
 			if soundPayload then
 				soundPayload.volume = math.clamp(tonumber(shot.Volume) or soundPayload.volume, 0, 10)
@@ -1345,10 +1585,16 @@ local function fireCutscene(action)
 			end
 			table.insert(payload.shots, {
 				animatedRig = rig ~= nil,
-				cameraCFrame = cameraCFrame,
+				cameraCFrame = rig and { rig.cameraPart.CFrame:GetComponents() } or cameraCFrame,
 				cameraModel = rig and rig.model or nil,
 				cameraPart = rig and rig.cameraPart or nil,
+				modelName = shot.CameraModelName,
+				modelRootName = shot.ModelRootName,
+				cameraPartName = shot.CameraPartName or "CameraPart",
 				animationId = rig and rig.animationId or nil,
+				animationName = shot.AnimationName or "CameraAnimation",
+				rigPartCount = parts,
+				rigJointCount = joints,
 				duration = math.clamp(tonumber(shot.Duration or shot.HoldDuration) or 0, 0, 120),
 				looped = shot.Looped == true,
 				animationSpeed = math.clamp(tonumber(shot.AnimationSpeed) or 1, 0.05, 4),
@@ -1378,9 +1624,9 @@ local function fireCutscene(action)
 				time = math.clamp(tonumber(event.Time or event.At) or 0, 0, 600),
 				type = "BlackScreen",
 				transitionType = transitionType,
-				fadeInSeconds = math.clamp(tonumber(event.FadeInSeconds) or 0.35, 0.01, 10),
+				fadeInSeconds = math.clamp(tonumber(event.FadeInSeconds) or 0.35, 0, 10),
 				holdSeconds = math.clamp(tonumber(event.HoldSeconds) or 1, 0, 120),
-				fadeOutSeconds = math.clamp(tonumber(event.FadeOutSeconds) or 0.35, 0.01, 10),
+				fadeOutSeconds = math.clamp(tonumber(event.FadeOutSeconds) or 0.35, 0, 10),
 			})
 		else
 			warn("StoryHorror: Unknown cutscene event Type " .. tostring(event.Type))
@@ -1388,9 +1634,37 @@ local function fireCutscene(action)
 	end
 
 	if #payload.shots > 0 then
-		fireUiToStoryPlayers("CutsceneStart", payload)
+		-- Clients that finish loading later seek every track to this same time.
+		-- The server task duration and other timed world actions keep their schedule.
+		payload.startedAt = Workspace:GetServerTimeNow()
+		if activeCutsceneAudience then closeCutscene() end
+		activeCutsceneAudience = action.Audience == "AllPlayers" and "AllPlayers" or "StoryPlayers"
+		for _, actor in ipairs(payload.actors) do keepCutsceneRigLoaded(actor.model) end
+		for _, shot in ipairs(payload.shots) do
+			if shot.cameraModel then keepCutsceneRigLoaded(shot.cameraModel) end
+			if not activeCutsceneFocus and shot.cameraPart then activeCutsceneFocus = shot.cameraPart end
+		end
+		for _, player in ipairs(Players:GetPlayers()) do
+			if activeCutsceneAudience == "AllPlayers" or activeStoryPlayers[player] then setCutsceneFocusForPlayer(player) end
+		end
+		if payload.clientTimeline then activeCutscenePayload = payload end
+		if payload.diagnostics then
+			print("StoryHorror: cutscene-v3 dispatch (audience=" .. activeCutsceneAudience .. ", place=" .. tostring(game.PlaceId)
+				.. ", published version=" .. tostring(game.PlaceVersion) .. ")")
+		end
+		if activeCutsceneAudience == "AllPlayers" then
+			fireUiToAllPlayers("CutsceneStart", payload)
+		else
+			fireUiToStoryPlayers("CutsceneStart", payload)
+		end
 	else
 		warn("StoryHorror: Cutscene has no valid camera shots.")
+		local errorPayload = { message = "Cutscene has no valid camera shots on the server. Check the camera ModelName, CameraPartName, AnimationName, and whether its map is loaded." }
+		if action.Audience == "AllPlayers" then
+			fireUiToAllPlayers("CutsceneError", errorPayload)
+		else
+			fireUiToStoryPlayers("CutsceneError", errorPayload)
+		end
 	end
 end
 
@@ -1401,24 +1675,6 @@ local function stopStoryAnimation(trackName, fadeTime)
 	if track.IsPlaying then
 		track:Stop(math.clamp(tonumber(fadeTime) or 0.2, 0, 10))
 	end
-end
-
-local function findAnimationModel(action)
-	local modelName = tostring(action.ModelName or "")
-	local rootName = tostring(action.ModelRootName or action.LoadedMapName or "")
-	local searchRoot = Workspace
-
-	if rootName ~= "" then
-		local loadedRecord = loadedStoryMaps[rootName]
-		searchRoot = loadedRecord and loadedRecord.instance or Workspace:FindFirstChild(rootName, true)
-		if not searchRoot then return nil end
-	end
-
-	if searchRoot:IsA("Model") and searchRoot.Name == modelName then
-		return searchRoot
-	end
-	local model = searchRoot:FindFirstChild(modelName, true)
-	return model and model:IsA("Model") and model or nil
 end
 
 local function playStoryAnimationWhenReady(action)
@@ -1450,17 +1706,7 @@ local function playStoryAnimationWhenReady(action)
 		return
 	end
 
-	local host = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
-	if not host then
-		host = Instance.new("AnimationController")
-		host.Name = "StoryAnimationController"
-		host.Parent = model
-	end
-	local animator = host:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = host
-	end
+	local animator = getStoryAnimator(model)
 
 	local trackName = tostring(action.TrackName or (modelName .. ":" .. animationName))
 	stopStoryAnimation(trackName, action.FadeTime)
@@ -1630,7 +1876,7 @@ local function runTaskAction(action)
 	elseif actionType == "cutscene" then
 		fireCutscene(action)
 	elseif actionType == "closecutscene" then
-		fireUiToStoryPlayers("CutsceneEnd", {})
+		closeCutscene()
 	elseif actionType == "playanimation" then
 		playStoryAnimation(action)
 	elseif actionType == "stopanimation" then
@@ -2149,6 +2395,22 @@ local function sendFullState(player)
 	end
 end
 
+local function syncReadyStoryClient(player)
+	local now = os.clock()
+	if storyClientReadyAt[player] and now - storyClientReadyAt[player] < 1 then return end
+	storyClientReadyAt[player] = now
+	sendFullState(player)
+	fireUi(player, "StoryReady", {
+		serverRevision = "cutscene-v3", placeId = game.PlaceId, placeVersion = game.PlaceVersion, universeId = game.GameId,
+	})
+	-- A live client may finish loading after the original broadcast. Replay the
+	-- active scene with its ORIGINAL timestamp, never restart it for everyone.
+	if activeCutscenePayload and (activeCutsceneAudience == "AllPlayers" or activeStoryPlayers[player]) then
+		setCutsceneFocusForPlayer(player)
+		fireUi(player, "CutsceneStart", activeCutscenePayload)
+	end
+end
+
 local function startStory()
 	storyActive = true
 	countdownEndsAt = nil
@@ -2299,7 +2561,7 @@ Players.PlayerAdded:Connect(function(player)
 			clearDeliveryState(true)
 			fireUiToStoryPlayers("Task2End", {})
 			fireUiToStoryPlayers("ConversationEnd", {})
-			fireUiToStoryPlayers("CutsceneEnd", {})
+			closeCutscene()
 			startTaskByIndex(taskIndex)
 			fireUiToStoryPlayers("Message", {
 				text = "Testing: jumped to task " .. tostring(taskIndex) .. ".",
@@ -2309,6 +2571,8 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
+	storyClientReadyAt[player] = nil
+	cutsceneFocusPlayers[player] = nil
 	playerData[player] = nil
 	registeredPlayers[player] = nil
 	activeStoryPlayers[player] = nil
@@ -2331,6 +2595,10 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 remoteEvent.OnServerEvent:Connect(function(player, action)
+	if action == "StoryClientReady" then
+		syncReadyStoryClient(player)
+		return
+	end
 	if action ~= "Task2Confirm" then
 		return
 	end
