@@ -2,11 +2,12 @@
 	StoryHorrorClient.lua
 	Place this LocalScript in StarterPlayerScripts or StarterGui.
 
-	This client only displays UI and locally hides/shows the story start ProximityPrompt.
+	Displays story UI and plays local camera/actor cutscene visuals.
 	The server still validates everything, so exploiters cannot start the story without enough points.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
+local ContentProvider = game:GetService("ContentProvider")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -46,10 +47,14 @@ local savedCameraSubject = nil
 local savedCameraCFrame = nil
 local cutsceneToken = 0
 local cutsceneActive = false
+local cutsceneServerStartedAt = nil
 local cutsceneSavedCamera = nil
 local cutsceneSounds = {}
 local cutsceneEffectGui = nil
 local cutsceneAnimationTrack = nil
+local cutsceneTimelineTracks = {}
+local cutsceneAnimationConnection = nil
+local CUTSCENE_CAMERA_BINDING = "StoryCutsceneCamera"
 local controlsWereDisabled = false
 local CUTSCENE_CONTROL_ACTION = "StoryCutsceneBlockControls"
 local activeHarvestSwings = setmetatable({}, { __mode = "k" })
@@ -815,6 +820,17 @@ end
 
 local function stopCutscene()
 	cutsceneToken += 1
+	cutsceneServerStartedAt = nil
+	RunService:UnbindFromRenderStep(CUTSCENE_CAMERA_BINDING)
+	if cutsceneAnimationConnection then
+		cutsceneAnimationConnection:Disconnect()
+		cutsceneAnimationConnection = nil
+	end
+	for _, track in ipairs(cutsceneTimelineTracks) do
+		track:Stop(0)
+		track:Destroy()
+	end
+	table.clear(cutsceneTimelineTracks)
 	if cutsceneAnimationTrack then
 		cutsceneAnimationTrack:Stop(0.1)
 		cutsceneAnimationTrack = nil
@@ -839,6 +855,7 @@ local function stopCutscene()
 		camera.CameraSubject = cutsceneSavedCamera.cameraSubject
 		camera.CFrame = cutsceneSavedCamera.cframe
 		camera.FieldOfView = cutsceneSavedCamera.fieldOfView
+		if cutsceneSavedCamera.focus then camera.Focus = cutsceneSavedCamera.focus end
 	end
 	cutsceneSavedCamera = nil
 
@@ -894,7 +911,7 @@ local function playCameraRigShot(shot, camera, token)
 	return token == cutsceneToken
 end
 
-local function playCutsceneSound(soundData)
+local function playCutsceneSound(soundData, elapsedSeconds)
 	if type(soundData) ~= "table" or tostring(soundData.soundId or "") == "" then
 		return
 	end
@@ -907,6 +924,9 @@ local function playCutsceneSound(soundData)
 	sound.Parent = SoundService
 	table.insert(cutsceneSounds, sound)
 	sound:Play()
+	if elapsedSeconds and elapsedSeconds > 0 then
+		sound.TimePosition = elapsedSeconds * sound.PlaybackSpeed
+	end
 	if not sound.Looped then
 		sound.Ended:Once(function()
 			if sound.Parent then sound:Destroy() end
@@ -922,7 +942,7 @@ local function waitForCutscene(token, duration)
 	return token == cutsceneToken
 end
 
-local function playBlackScreenEffect(event, token)
+local function playBlackScreenEffect(event, token, startedAt)
 	if token ~= cutsceneToken then return end
 	if cutsceneEffectGui then cutsceneEffectGui:Destroy() end
 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
@@ -939,11 +959,12 @@ local function playBlackScreenEffect(event, token)
 	local fadeIn = tonumber(event.fadeInSeconds) or 0.35
 	local hold = tonumber(event.holdSeconds) or 1
 	local fadeOut = tonumber(event.fadeOutSeconds) or 0.35
+	startedAt = startedAt or Workspace:GetServerTimeNow()
 	local transitionType = string.lower(tostring(event.transitionType or "normal"))
+	local top, bottom, black
 	if transitionType == "wink" then
-		-- Use fixed half-screen panels and tween their positions. Tweening a Frame
-		-- from zero height was unreliable on some viewport/device combinations.
-		local top = Instance.new("Frame")
+		-- Fixed half-screen panels work across different viewport sizes.
+		top = Instance.new("Frame")
 		top.Name = "TopEyelid"
 		top.Size = UDim2.fromScale(1, 0.505)
 		top.Position = UDim2.fromScale(0, -0.505)
@@ -952,7 +973,7 @@ local function playBlackScreenEffect(event, token)
 		top.ZIndex = 10
 		top.Parent = effectGui
 
-		local bottom = Instance.new("Frame")
+		bottom = Instance.new("Frame")
 		bottom.Name = "BottomEyelid"
 		bottom.Size = UDim2.fromScale(1, 0.505)
 		bottom.Position = UDim2.fromScale(0, 1)
@@ -960,51 +981,367 @@ local function playBlackScreenEffect(event, token)
 		bottom.BorderSizePixel = 0
 		bottom.ZIndex = 10
 		bottom.Parent = effectGui
-
-		local closeInfo = TweenInfo.new(fadeIn, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
-		TweenService:Create(top, closeInfo, { Position = UDim2.fromScale(0, 0) }):Play()
-		TweenService:Create(bottom, closeInfo, { Position = UDim2.fromScale(0, 0.495) }):Play()
-		if not waitForCutscene(token, fadeIn + hold) then return end
-
-		local openInfo = TweenInfo.new(fadeOut, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
-		TweenService:Create(top, openInfo, { Position = UDim2.fromScale(0, -0.505) }):Play()
-		TweenService:Create(bottom, openInfo, { Position = UDim2.fromScale(0, 1) }):Play()
 	else
-		local black = Instance.new("Frame")
+		black = Instance.new("Frame")
 		black.Name = "BlackScreen"
 		black.Size = UDim2.fromScale(1, 1)
 		black.BackgroundColor3 = Color3.new(0, 0, 0)
 		black.BackgroundTransparency = 1
 		black.BorderSizePixel = 0
 		black.Parent = effectGui
-		TweenService:Create(black, TweenInfo.new(fadeIn, Enum.EasingStyle.Linear), { BackgroundTransparency = 0 }):Play()
-		if not waitForCutscene(token, fadeIn + hold) then return end
-		TweenService:Create(black, TweenInfo.new(fadeOut, Enum.EasingStyle.Linear), { BackgroundTransparency = 1 }):Play()
 	end
-	if not waitForCutscene(token, fadeOut) then return end
+	while token == cutsceneToken and cutsceneEffectGui == effectGui do
+		local elapsed = Workspace:GetServerTimeNow() - startedAt
+		if elapsed >= fadeIn + hold + fadeOut then break end
+		local coverage = 1
+		if elapsed < fadeIn then
+			coverage = math.clamp(elapsed / fadeIn, 0, 1)
+		elseif elapsed > fadeIn + hold then
+			coverage = fadeOut > 0 and 1 - math.clamp((elapsed - fadeIn - hold) / fadeOut, 0, 1) or 0
+		end
+		if top then
+			coverage = TweenService:GetValue(coverage, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+			top.Position = UDim2.fromScale(0, -0.505 * (1 - coverage))
+			bottom.Position = UDim2.fromScale(0, 1 - 0.505 * coverage)
+		else
+			black.BackgroundTransparency = 1 - coverage
+		end
+		RunService.RenderStepped:Wait()
+	end
 	if cutsceneEffectGui == effectGui then cutsceneEffectGui = nil end
 	effectGui:Destroy()
 end
 
+local function describeCutsceneAnimation(data)
+	return tostring(data.modelName or "camera") .. "/" .. tostring(data.animationName or "Animation")
+		.. " [" .. tostring(data.animationId or "missing animation ID") .. "]"
+end
+
+local function isCutsceneTimelineRigReady(model, data)
+	local expectedParts = tonumber(data.rigPartCount) or 0
+	local expectedJoints = tonumber(data.rigJointCount) or 0
+	if expectedParts == 0 and expectedJoints == 0 then return true end
+	local parts, joints = 0, 0
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then parts += 1 end
+		if descendant:IsA("Motor6D") or descendant:IsA("Bone") then joints += 1 end
+	end
+	return parts >= expectedParts and joints >= expectedJoints
+end
+
+local function findCutsceneTimelineRig(data)
+	local model = data.model or data.cameraModel
+	if typeof(model) ~= "Instance" or not model:IsA("Model") or not model:IsDescendantOf(Workspace) then
+		local root = Workspace
+		if data.modelRootName and data.modelRootName ~= "" then
+			root = Workspace:FindFirstChild(data.modelRootName, true)
+		end
+		local name = tostring(data.modelName or "")
+		model = root and name ~= "" and (root.Name == name and root or root:FindFirstChild(name, true)) or nil
+	end
+	if not model or not model:IsA("Model") then return nil end
+	local cameraPart = data.cameraPart
+	if typeof(cameraPart) ~= "Instance" or not cameraPart:IsA("BasePart") or not cameraPart:IsDescendantOf(model) then
+		cameraPart = data.animatedRig and model:FindFirstChild(data.cameraPartName or "CameraPart", true) or nil
+	end
+	return model, cameraPart and cameraPart:IsA("BasePart") and cameraPart or nil
+end
+
+local function loadCutsceneTimelineTrack(data, token)
+	local deadline = os.clock() + 15
+	local model, cameraPart
+	repeat
+		if token ~= cutsceneToken then return nil end
+		model, cameraPart = findCutsceneTimelineRig(data)
+		if model and (not data.animatedRig or cameraPart) and isCutsceneTimelineRigReady(model, data) then break end
+		if os.clock() >= deadline then
+			error("Rig missing or incompletely replicated after 15 seconds (root=" .. tostring(data.modelRootName or "Workspace")
+				.. ", StreamingEnabled=" .. tostring(Workspace.StreamingEnabled) .. ")")
+		end
+		RunService.Heartbeat:Wait()
+	until false
+
+	local host = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
+	if not host then
+		host = Instance.new("AnimationController")
+		host.Parent = model
+	end
+	local animator = host:FindFirstChildOfClass("Animator")
+	if not animator then
+		-- A local fallback also handles the Animator not having replicated yet.
+		animator = Instance.new("Animator")
+		animator.Parent = host
+	end
+	local animation = Instance.new("Animation")
+	animation.AnimationId = tostring(data.animationId or "")
+	local ok, track = pcall(function() return animator:LoadAnimation(animation) end)
+	animation:Destroy()
+	if not ok or not track then
+		error("Animator:LoadAnimation failed for " .. tostring(data.animationId) .. ": " .. tostring(track))
+	end
+	if token ~= cutsceneToken then track:Destroy(); return nil end
+	table.insert(cutsceneTimelineTracks, track)
+	track.Priority = getEnumItem(Enum.AnimationPriority, data.priority, Enum.AnimationPriority.Action)
+	track.Looped = data.looped == true
+	-- Start loading/evaluating BEFORE checking Length. Zero weight prevents an
+	-- upcoming camera shot from overriding the current shot on the same rig.
+	track:Play(0, 0, 0)
+	return { track = track, model = model, cameraPart = cameraPart, deadline = deadline }
+end
+
+local function playCutsceneTimeline(payload, camera, token)
+	local startedAt = tonumber(payload.startedAt) or Workspace:GetServerTimeNow()
+	local experienceContext = "universe=" .. tostring(payload.universeId or "?") .. ", place=" .. tostring(payload.placeId or "?")
+	if payload.diagnostics then
+		print("StoryHorror: client cutscene-v3 received " .. tostring(payload.serverRevision) .. " scene (" .. experienceContext
+			.. ", published version=" .. tostring(payload.placeVersion) .. ", StreamingEnabled=" .. tostring(Workspace.StreamingEnabled) .. ")")
+	end
+	local states, shots = {}, {}
+	local duration, effectsEnd = 0, 0
+	local activeShot
+
+	local function newState(data)
+		local state = {
+			data = data,
+			speed = math.max(0.05, tonumber(data.speed or data.animationSpeed) or 1),
+			startTime = 0,
+			endTime = math.huge,
+		}
+		table.insert(states, state)
+		return state
+	end
+	for _, shot in ipairs(payload.shots or {}) do
+		local entry = { data = shot }
+		if shot.animatedRig then entry.state = newState(shot) end
+		table.insert(shots, entry)
+	end
+	for _, actor in ipairs(payload.actors or {}) do newState(actor) end
+	for _, event in ipairs(payload.events or {}) do
+		effectsEnd = math.max(effectsEnd, (tonumber(event.time) or 0)
+			+ (tonumber(event.fadeInSeconds) or 0) + (tonumber(event.holdSeconds) or 0) + (tonumber(event.fadeOutSeconds) or 0))
+	end
+
+	local function refreshSchedule()
+		local shotEnd = 0
+		for _, entry in ipairs(shots) do
+			entry.startTime = shotEnd
+			local shot = entry.data
+			if entry.state then
+				local shotDuration = tonumber(shot.duration) or 0
+				if shotDuration <= 0 then
+					local info = entry.state.info
+					shotDuration = info and info.track.Length > 0 and info.track.Length / entry.state.speed or 10
+				end
+				shotEnd += shotDuration
+				entry.state.startTime, entry.state.endTime = entry.startTime, shotEnd
+			else
+				shotEnd += math.max(0, tonumber(shot.moveDuration) or 0) + math.max(0, tonumber(shot.holdDuration) or 0)
+			end
+			entry.endTime = shotEnd
+		end
+		duration = math.max(shotEnd, effectsEnd)
+	end
+	refreshSchedule()
+	if Workspace:GetServerTimeNow() - startedAt >= duration then stopCutscene(); return end
+
+	local function releaseState(state, reason)
+		local info = state.info
+		state.info = nil
+		state.failed = true
+		if info then
+			local index = table.find(cutsceneTimelineTracks, info.track)
+			if index then table.remove(cutsceneTimelineTracks, index) end
+			info.track:Stop(0)
+			info.track:Destroy()
+		end
+		warn("StoryHorror: " .. describeCutsceneAnimation(state.data) .. ": " .. reason
+			.. " (" .. experienceContext .. "); continuing the camera cutscene.")
+	end
+
+	local function updateAnimations()
+		if token ~= cutsceneToken then return end
+		local elapsed = math.max(0, Workspace:GetServerTimeNow() - startedAt)
+		local active = {}
+		local resync = false
+		for _, state in ipairs(states) do
+			local info = state.info
+			if not info then continue end
+			local track = info.track
+			if track.Length > 0 and not state.lengthReady then
+				state.lengthReady = true
+				refreshSchedule()
+			end
+			if not info.model:IsDescendantOf(Workspace) then
+				releaseState(state, "rig unloaded")
+			elseif track.Length <= 0 then
+				if os.clock() >= info.deadline then
+					releaseState(state, "animation length stayed zero; check this experience's animation access, published ID, moderation, and F9 asset-fetch errors")
+				end
+			elseif elapsed >= state.startTime and elapsed < state.endTime then
+				local position = (elapsed - state.startTime) * state.speed
+				local speed = state.speed
+				if state.data.looped then
+					position %= track.Length
+				elseif position >= track.Length - 0.00001 then
+					position = math.max(0, track.Length - 0.00001)
+					speed = 0 -- Hold the last pose instead of restarting a finished clip.
+				end
+				local difference = math.abs(track.TimePosition - position)
+				if state.data.looped then difference = math.min(difference, math.abs(track.Length - difference)) end
+				if not state.started or not track.IsPlaying or difference > 1 / 30 then resync = true end
+				table.insert(active, { state = state, position = position, speed = speed })
+			elseif state.started then
+				track:Stop(0)
+				state.started = false
+			end
+		end
+		for _, entry in ipairs(active) do
+			local state = entry.state
+			local track = state.info.track
+			if not state.started or not track.IsPlaying then
+				track:Play(0, 1, entry.speed)
+				state.started = true
+				state.playbackSpeed = entry.speed
+			end
+			if resync then track.TimePosition = entry.position end
+			if state.playbackSpeed ~= entry.speed then
+				track:AdjustSpeed(entry.speed)
+				state.playbackSpeed = entry.speed
+			end
+		end
+	end
+
+	local function updateCamera()
+		if token ~= cutsceneToken then return end
+		local elapsed = math.max(0, Workspace:GetServerTimeNow() - startedAt)
+		if elapsed >= duration then stopCutscene(); return end
+		camera = Workspace.CurrentCamera or camera
+		camera.CameraType = Enum.CameraType.Scriptable
+		for _, entry in ipairs(shots) do
+			if elapsed < entry.startTime or elapsed >= entry.endTime then continue end
+			local shot = entry.data
+			if activeShot ~= entry then
+				activeShot = entry
+				entry.fromCFrame, entry.fromFieldOfView = camera.CFrame, camera.FieldOfView
+				playCutsceneSound(shot.sound, elapsed - entry.startTime)
+			end
+			if entry.state then
+				local _, part = findCutsceneTimelineRig(shot)
+				-- Redirect immediately, even while actors or animations are loading.
+				local target = part and part.CFrame or cframeFromPayload(shot.cameraCFrame)
+				if target then camera.CFrame = target; camera.Focus = target end
+				if shot.fieldOfView then camera.FieldOfView = shot.fieldOfView end
+			else
+				local target = cframeFromPayload(shot.cameraCFrame)
+				local moveDuration = math.max(0, tonumber(shot.moveDuration) or 0)
+				local alpha = moveDuration > 0 and math.clamp((elapsed - entry.startTime) / moveDuration, 0, 1) or 1
+				alpha = TweenService:GetValue(alpha, getEnumItem(Enum.EasingStyle, shot.easingStyle, Enum.EasingStyle.Sine),
+					getEnumItem(Enum.EasingDirection, shot.easingDirection, Enum.EasingDirection.InOut))
+				if target then camera.CFrame = entry.fromCFrame:Lerp(target, alpha) end
+				if shot.fieldOfView then camera.FieldOfView = entry.fromFieldOfView + (shot.fieldOfView - entry.fromFieldOfView) * alpha end
+			end
+			break
+		end
+	end
+
+	cutsceneAnimationConnection = RunService.PreAnimation:Connect(updateAnimations)
+	RunService:BindToRenderStep(CUTSCENE_CAMERA_BINDING, Enum.RenderPriority.Camera.Value + 1, updateCamera)
+	updateCamera()
+
+	-- Streaming can omit Instance references for viewers away from the scene.
+	-- Request the initial camera area without blocking camera ownership or playback.
+	local firstShot = shots[1] and shots[1].data
+	if Workspace.StreamingEnabled and firstShot and firstShot.cameraCFrame then
+		local target = cframeFromPayload(firstShot.cameraCFrame)
+		if target then
+			task.spawn(function() pcall(function() player:RequestStreamAroundAsync(target.Position, 5) end) end)
+		end
+	end
+	for _, state in ipairs(states) do
+		task.spawn(function()
+			local ok, info = pcall(loadCutsceneTimelineTrack, state.data, token)
+			if token ~= cutsceneToken then return end
+			if not ok or not info then
+				state.failed = true
+				warn("StoryHorror: Could not load local cutscene rig " .. describeCutsceneAnimation(state.data)
+					.. (ok and "; check the model and animation names." or (": " .. tostring(info))))
+				return
+			end
+			state.info = info
+			refreshSchedule()
+		end)
+	end
+	-- Asset warming is optional background work; playback never waits for this.
+	task.spawn(function()
+		local assets = {}
+		for _, state in ipairs(states) do
+			local animation = Instance.new("Animation")
+			animation.AnimationId = tostring(state.data.animationId or "")
+			table.insert(assets, animation)
+		end
+		local ok, message = pcall(function()
+			ContentProvider:PreloadAsync(assets, function(assetId, status)
+				if token ~= cutsceneToken or status == Enum.AssetFetchStatus.Success then return end
+				warn("StoryHorror: Asset fetch " .. tostring(status) .. " for " .. tostring(assetId) .. " (" .. experienceContext
+					.. "). Verify the published experience has access to this animation; client playback cannot bypass Roblox asset permissions.")
+			end)
+		end)
+		if not ok and token == cutsceneToken then warn("StoryHorror: Background animation preload failed: " .. tostring(message)) end
+		for _, animation in ipairs(assets) do animation:Destroy() end
+	end)
+	for _, event in ipairs(payload.events or {}) do
+		local eventTime = math.max(0, tonumber(event.time) or 0)
+		local eventEnd = eventTime + (tonumber(event.fadeInSeconds) or 0) + (tonumber(event.holdSeconds) or 0) + (tonumber(event.fadeOutSeconds) or 0)
+		task.delay(math.max(0, startedAt + eventTime - Workspace:GetServerTimeNow()), function()
+			if token == cutsceneToken and event.type == "BlackScreen" and Workspace:GetServerTimeNow() < startedAt + eventEnd then
+				playBlackScreenEffect(event, token, startedAt + eventTime)
+			end
+		end)
+	end
+end
+
 local function playCutscene(payload)
+	local serverStartedAt = tonumber(payload.startedAt)
+	if cutsceneActive and serverStartedAt and cutsceneServerStartedAt == serverStartedAt then return end
 	stopCutscene()
 	destroyConversationGui()
 	cutsceneToken += 1
 	local token = cutsceneToken
 	local camera = Workspace.CurrentCamera
-	if not camera then return end
+	local cameraDeadline = os.clock() + 5
+	while not camera and token == cutsceneToken and os.clock() < cameraDeadline do
+		RunService.Heartbeat:Wait()
+		camera = Workspace.CurrentCamera
+	end
+	if token ~= cutsceneToken then return end
+	if not camera then
+		warn("StoryHorror: Cutscene received, but Workspace.CurrentCamera was unavailable for 5 seconds.")
+		return
+	end
 
 	cutsceneActive = true
+	cutsceneServerStartedAt = serverStartedAt
 	cutsceneSavedCamera = {
 		cameraType = camera.CameraType,
 		cameraSubject = camera.CameraSubject,
 		cframe = camera.CFrame,
 		fieldOfView = camera.FieldOfView,
+		focus = camera.Focus,
 	}
 	if payload.freezeControls ~= false then
 		setCutsceneControlsEnabled(false)
 	end
 	camera.CameraType = Enum.CameraType.Scriptable
+	if payload.clientTimeline == true or #(payload.actors or {}) > 0 then
+		task.spawn(function()
+			local ok, message = pcall(playCutsceneTimeline, payload, camera, token)
+			if not ok and token == cutsceneToken then
+				warn("StoryHorror: " .. tostring(message))
+				stopCutscene()
+			end
+		end)
+		return
+	end
 
 	local cutsceneStartedAt = os.clock()
 	local latestEventEnd = 0
@@ -1122,7 +1459,11 @@ end)
 remoteEvent.OnClientEvent:Connect(function(action, payload)
 	payload = payload or {}
 
-	if action == "PointsUpdate" or action == "CollectibleCount" then
+	if action == "StoryReady" then
+		print("StoryHorror: client cutscene-v3 ready; server=" .. tostring(payload.serverRevision)
+			.. ", place=" .. tostring(payload.placeId) .. ", published version=" .. tostring(payload.placeVersion)
+			.. ", universe=" .. tostring(payload.universeId))
+	elseif action == "PointsUpdate" or action == "CollectibleCount" then
 		local newPoints = tonumber(payload.points)
 		if not newPoints and payload.collected then
 			newPoints = (tonumber(payload.collected) or 0) * (tonumber(payload.pointsPerCollectible) or 10)
@@ -1164,6 +1505,8 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		destroyConversationGui()
 	elseif action == "CutsceneStart" then
 		playCutscene(payload)
+	elseif action == "CutsceneError" then
+		warn("StoryHorror: " .. tostring(payload.message))
 	elseif action == "CutsceneEnd" then
 		stopCutscene()
 	elseif action == "TaskComplete" then
@@ -1180,6 +1523,11 @@ remoteEvent.OnClientEvent:Connect(function(action, payload)
 		playTreeShake(payload.tree, payload.pivot, payload.angleDegrees)
 	end
 end)
+
+-- Register the listener before asking for state. Published clients can finish
+-- loading after CutsceneStart was originally broadcast; the server replays it.
+print("StoryHorror: client cutscene-v3 loaded; requesting server state.")
+remoteEvent:FireServer("StoryClientReady")
 
 RunService.RenderStepped:Connect(function()
 	if countdownEndsAt then
